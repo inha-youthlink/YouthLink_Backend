@@ -142,16 +142,16 @@ RAG 평가 서버(RAGAS)가 `POST /internal/pipeline?debug=true`로 채점한다
 ### ERD 변경 요청 ([design.md](../design.md) 16절)
 | 요청 | 이유 |
 |---|---|
-| `chat_room.session_id` (`NOT NULL`, 인덱스) | 세션별 채팅방 목록, 소유권 확인 |
-| `chat_room.current_policy_no` 또는 `state` JSONB | 후속 질문의 기준 정책 |
+| `chat_room.user_id` (`NOT NULL`, 인덱스) | 사용자별 채팅방 목록, 소유권 확인 |
+| `chat_current_policy` 테이블 (`room_id`, `policy_no`, `display_order`) | 후속 질문의 기준 정책 (여러 개 가능) |
 | `chat_message.metadata` JSONB | intent, 재작성된 질문, trace 요약 |
 
 ### API ([design.md](../design.md) 4-2)
 ```
-POST /api/rooms                     채팅방 생성 (session_id, profile) → room_id
-GET  /api/rooms?session_id=...      세션의 채팅방 목록
+POST /api/rooms                     채팅방 생성 (user_id, profile) → room_id
+GET  /api/rooms?user_id=...         사용자의 채팅방 목록
 GET  /api/rooms/{room_id}/messages  대화 기록 조회
-POST /api/rooms/{room_id}/messages  질문 전송 (session_id, question, action)
+POST /api/rooms/{room_id}/messages  질문 전송 (user_id, question, action)
 ```
 
 ### 처리 흐름
@@ -159,8 +159,8 @@ POST /api/rooms/{room_id}/messages  질문 전송 (session_id, question, action)
 POST /api/rooms/{room_id}/messages
   → api/rooms.py                  요청 검증
   → services/chat_service.py
-      1. 세션-채팅방 소유 확인 (다르면 404)          chat_repository
-      2. 프로필, 최근 대화, 현재 정책 조회             chat_repository
+      1. 사용자-채팅방 소유 확인 (다르면 404)        chat_repository
+      2. 프로필, 최근 대화, 현재 정책 목록 조회        chat_repository
       3. PipelineInput 구성 → run_pipeline()       5주차 흐름 + 대화 기록
       4. 메시지, metadata, message_policy_ref 저장  chat_repository
   → 응답 (answer, sources 등)
@@ -168,7 +168,7 @@ POST /api/rooms/{room_id}/messages
 - `POST /internal/pipeline`은 그대로 유지한다 (저장 없음, 평가·디버깅용)
 
 ### 구현 전에 정할 것
-- 현재 정책 저장 형태 (`current_policy_no` 컬럼 vs `state` JSONB)
+- ~~현재 정책 저장 형태~~ → 목록, `chat_current_policy` 테이블로 확정 (복합 질문·비교 대비)
 - 파이프라인에 넘길 최근 대화 턴 수와 `PipelineInput` 필드 (기본값 있는 선택 필드로 추가)
 - 질문 전송 응답 형식과 `/internal/pipeline` 응답의 관계
 
@@ -176,17 +176,20 @@ POST /api/rooms/{room_id}/messages
 
 | 의존 | 영향 | 대기 중에 할 일 |
 |---|---|---|
-| ETL 청킹·임베딩 적재 (5주차부터 대기) | 실제 데이터 확인, 평가 서버 연동(dev `RAG_BASE_URL`), 지역 작업 | 가짜 데이터로 개발 |
-| [ETL #3](https://github.com/inha-youthlink/youthlink-data-pipeline/issues/3) 인천 코드 보정, 지역 판정 | 지역 코드 반영 | 다른 작업 진행 |
-| [ETL #2](https://github.com/inha-youthlink/youthlink-data-pipeline/issues/2) 신청기간 파싱 예외 | 4건의 신청 상태 표시 | |
+| ~~ETL 청킹·임베딩 적재~~ → **완료** (`25b9100`, 10-11) | 실제 데이터 확인, 평가 서버 연동(dev `RAG_BASE_URL`) | 로컬 DB 재구성 (아래) |
+| ETL DB 덤프 | 로컬 DB 재구성. 지금 로컬 DB(프로토타입 청크 `full`/`part`)에는 005가 적용되지 않음 | ERD 이슈와 함께 요청 |
+| [ETL #3](https://github.com/inha-youthlink/youthlink-data-pipeline/issues/3) 인천 코드 보정, 지역 판정 | 지역 코드 반영. 007에서 지역 범위 View 추가됨 (이슈는 열려 있음) | 이슈 종료 후 지역 작업 재개 |
+| [ETL #2](https://github.com/inha-youthlink/youthlink-data-pipeline/issues/2) 신청기간 파싱 예외 | 006에서 대응됨 (이슈는 열려 있음). 기간 두 개인 정책은 RAG 판정 필요 (7주차) | |
 | ERD 변경 PR 리뷰 | 채팅 저장 머지 | 로컬 DB에 마이그레이션 먼저 적용 |
+
+- ETL 변경 영향 정리: `notes/6주차관련/ETL_변경영향.md`. RAG 코드가 깨지는 곳은 없음
 
 ## 9. 확인 환경
 
-- 5주차 가짜 데이터(정책 25개)로 확인한다
-- 가짜 데이터에는 마감 코드(`0057003`) 정책이 없다. 마감 코드 확인과 7주차 신청 상태 우선순위 확인을 위해 마감 정책을 추가한다
-- ERD 변경 마이그레이션은 로컬 DB에 먼저 적용해 채팅 저장을 개발한다
-- 실제 ETL 데이터가 준비되면 5주차 질문 세트로 다시 확인한다
+- ETL 청킹·임베딩이 완료되어(10-11), 로컬 DB를 ETL 덤프로 새로 구성한다. 덤프를 받기 전까지는 5주차 가짜 데이터(정책 25개)로 확인한다
+- 실제 데이터에는 마감 코드(`0057003`) 정책이 있어, 덤프를 받으면 가짜 데이터에 마감 정책을 추가하지 않아도 된다
+- ERD 변경 마이그레이션(008)은 덤프 위에 먼저 적용해 채팅 저장을 개발한다
+- 청크 구조가 바뀌어(정책당 최대 4개) 검색 양상이 5주차와 다르다. 실제 데이터 재평가는 7주차에 한다
 
 ## 10. 구현 체크리스트
 
@@ -194,8 +197,9 @@ POST /api/rooms/{room_id}/messages
 - [x] debug 모드: `trace.contexts`, `retrieved_chunks[].content`, `?debug=true` (PR #15)
 - [x] 지역 코드 분석: ETL 지역 테이블 확인, API 전체 `zipCd` 분석
 - [x] ETL 이슈 등록: 인천 코드 보정 (#3), 신청기간 파싱 예외 (#2)
-- [ ] 마감 코드 판정·표시 수정
-- [ ] 가짜 데이터에 마감 코드 정책 추가
+- [x] 마감 코드 판정·표시 수정 (PR #16)
+- [ ] ~~가짜 데이터에 마감 코드 정책 추가~~ → ETL 덤프로 대체
+- [ ] ETL DB 덤프 요청, 로컬 DB 재구성
 - [ ] 신청 상태 확인용 질문 세트 초안 (7주차 우선순위 준비)
 - [ ] ERD 변경 이슈·PR (ETL 저장소)
 - [ ] 채팅 API 요청·응답 형식 확정 (7절 "구현 전에 정할 것")
@@ -204,19 +208,20 @@ POST /api/rooms/{room_id}/messages
 
 대기
 - [ ] 지역 코드 반영 (ETL #3 이후)
-- [ ] 실제 ETL 데이터로 재확인 (청킹 적재 후)
+- [ ] 실제 ETL 데이터로 재확인 (덤프 복원 후)
 
 ## 11. 7주차 미리보기
 
 | 순서 | 작업 | 내용 |
 |---|---|---|
 | 1 | 질문 분석 | intent 분류(LLM 기반 쿼리 라우팅), 질문 재작성, 정책 지목. 출력 스키마에 신청 상태 관련 신호 포함 ("지금 신청 가능한 것만", "마감된 것도") |
-| 2 | 신청 상태 우선순위 | [design.md](../design.md) 10-4의 "정할 것" 확정 (상태 순서, 질문 유형별 적용, 관련성 기준, 마감 정책 범위) |
+| 2 | 신청 상태 우선순위 | [design.md](../design.md) 10-4의 "정할 것" 확정 (상태 순서, 질문 유형별 적용, 관련성 기준, 마감 정책 범위). 신청 기간이 두 개인 정책 판정 (`policy_application_period`, ETL 006) |
 | 3 | 1차 필터링 | 첫 조건은 신청 상태. `policy_ids`로 검색 범위 제한 |
-| 4 | 핸들러 확장 | 범위 밖 → 정책 상세 → 정책 목록. 핸들러마다 유형별 답변 명세 먼저 ([design.md](../design.md) 12-1) |
-| 5 | 현재 정책 상태 | 후속 질문의 기준 정책, 정책 지목 ("두 번째 거") |
+| 4 | 핸들러 확장 | 범위 밖 → 정책 상세 → 정책 목록. 핸들러마다 유형별 답변 명세 먼저 ([design.md](../design.md) 12-1). 근거 중복 정리 (`APPLICATION` 청크와 `[신청 방법]`·`[제출 서류]`) |
+| 5 | 현재 정책 상태 | 후속 질문의 기준 정책 목록, 정책 지목 ("두 번째 거") |
+| 6 | 실제 데이터 재평가 | 5주차 질문 세트, 평가 서버 연동. 청크 구조 변경(ETL 005) 반영 |
 
 - 질문 분석은 intent만 출력하고, 핸들러 선택은 코드가 한다. 핸들러의 차이는 검색 기법이 아니라 무엇을, 어디서, 어떤 범위로 찾는지다
 - 1차 필터링은 6주차에 "지역이 빠지면 효과가 작다"는 이유로 미뤘으나, 신청 상태를 첫 조건으로 두면 지역 없이도 의미가 있다. 상태는 코드로 정확히 판정되고 ETL 답변을 기다리지 않아도 된다. 신청 상태 우선순위와 구현 방식(`policy_ids`)이 같아 함께 만든다
-- 대기: 지역 코드 반영 (ETL #3 답변 후), 실제 ETL 데이터로 재확인과 평가 서버 연동 (청킹 적재 후)
+- 대기: 지역 코드 반영 (ETL #3 종료 후, `v_policy_region_scope` 활용 검토)
 - ~8주차: 자격 확인·비교 핸들러, 관련성 판정
