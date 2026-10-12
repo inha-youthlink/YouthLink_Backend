@@ -55,6 +55,10 @@ uv run uvicorn app.main:app --reload
 |---|---|---|
 | GET | `/health` | 서버 상태 확인 |
 | POST | `/internal/pipeline` | 프로필 + 질문 → 추천 정책 + 답변 + trace (저장 없음) |
+| POST | `/api/rooms` | 채팅방 생성 (프로필은 이때만 받음) |
+| GET | `/api/rooms` | 사용자의 채팅방 목록 |
+| POST | `/api/rooms/{room_id}/messages` | 질문 전송 → 답변 + 추천 정책 (대화 저장) |
+| GET | `/api/rooms/{room_id}/messages` | 대화 기록 조회 |
 
 ### `POST /internal/pipeline`
 
@@ -86,17 +90,35 @@ RAG 평가·디버깅용입니다. 근거 원문 같은 내부 정보는 debug �
 - `contexts`: LLM에 넘긴 정책별 근거 블록 (`list[str]`). 정책 정보(신청 상태, 신청 방법 등)와 청크 본문이 함께 들어 있습니다. 검색된 정책이 없으면 `[]`
 - `retrieved_chunks`: 검색된 청크 목록 (`chunk_id`, `policy_no`, `chunk_type`, `chunk_index`, `score`, `content`), 검색 점수순
 
+### 채팅 API (`/api/rooms`)
+
+대화를 저장하는 API입니다. Spring 연동 후에는 Spring만 호출합니다 (외부 비공개).
+
+```
+1. POST /api/rooms                     {"user_id": "u1", "profile": {"age": 24}}  → 201 {"room_id": "..."}
+2. POST /api/rooms/{room_id}/messages  {"user_id": "u1", "question": "..."}       → {"message_id", "answer", "policies"}
+3. GET  /api/rooms/{room_id}/messages?user_id=u1                                  → {"messages": [...]}
+```
+
+- 채팅방 프로필은 생성할 때만 받고 이후 수정하지 않습니다. 조건이 바뀌면 새 채팅방을 만듭니다.
+- `user_id`가 채팅방 소유자와 다르거나 채팅방이 없으면 404입니다. RAG 서버는 인증하지 않고 `user_id`를 그대로 믿습니다.
+- 질문과 답변은 답변까지 성공한 뒤 한 번에 저장합니다. 실패하면(503) 아무것도 저장하지 않습니다.
+- `policies`는 `/internal/pipeline`과 같은 형식이고, 기록 조회에서도 같은 형식으로 복원됩니다.
+- 6주차에는 대화를 저장만 하고, 이전 대화를 답변에 활용하는 것은 7주차부터입니다.
+- 채팅 테이블은 ETL 저장소의 마이그레이션 008이 적용된 DB가 필요합니다.
+
 ## 디렉터리 구조
 
 ```
 app/
 ├─ main.py         # 앱 생성, lifespan, 라우터 등록
-├─ api/            # 라우터 (health, internal)
+├─ api/            # 라우터 (health, internal, rooms)
 ├─ core/           # 설정, 의존성 주입
 ├─ schemas/        # 요청·응답 스키마
 ├─ llm/            # OpenAI 호출 (임베딩, 답변 생성)
-├─ pipeline/       # RAG 처리 흐름 (검색, 정책 묶기, 답변 생성)
-├─ repositories/   # DB 조회 (읽기 전용)
+├─ pipeline/       # RAG 처리 흐름 (검색, 정책 묶기, 답변 생성). DB에 쓰지 않음
+├─ services/       # 채팅 처리 흐름 (소유 확인 → 파이프라인 → 저장)
+├─ repositories/   # DB 접근 (정책 테이블은 읽기, 채팅 테이블은 읽기·쓰기)
 └─ prompts/        # 프롬프트 파일 (버전별)
 docs/              # 설계 문서, 주차별 작업 기록
 ```
