@@ -58,9 +58,11 @@
 | 테이블 | 쓰기 | 읽기 |
 |---|---|---|
 | `policy`, `policy_region`, `policy_eligibility_code`, `common_code`, `policy_chunk`, `region`, `region_code_mapping` | ETL | RAG |
-| `chat_room`, `chat_profile`, `chat_message`, `message_policy_ref` | **RAG** | **RAG** |
+| `chat_room`, `chat_profile`, `chat_message`, `message_policy_ref`, `chat_current_policy` | **RAG** | **RAG** |
 
 어느 시점이든 **한 테이블에 쓰는 서버는 하나**.
+
+- Spring은 채팅 테이블에 직접 접근하지 않는다 (읽기 포함). 필요한 정보는 RAG API로 받는다 (6주차 결정). 같은 DB라 직접 읽을 수는 있지만, RAG가 채팅 테이블을 바꿀 때마다 Spring도 함께 깨지기 때문
 
 **채팅 테이블 DDL** (6주차 결정): DDL과 마이그레이션은 ETL 저장소(`db/schema.sql`, `db/migrations/`)에서 관리하고, 변경은 RAG가 ETL 저장소에 이슈·PR로 진행한다. 데이터는 RAG가 쓴다.
 - 스키마를 한곳(ETL 저장소)에서 보고, 한 DB에 마이그레이션 방식을 하나만 유지한다
@@ -115,12 +117,11 @@ YouthLink_RAG/
 │  ├─ api/
 │  │  ├─ internal.py             # POST /internal/pipeline (저장 없음, 계속 유지)
 │  │  ├─ health.py               # GET /health
-│  │  └─ rooms.py                [+ 6주차] 채팅방/메시지 API (Spring이 호출)
+│  │  └─ rooms.py                # 채팅방·메시지 API (Spring이 호출, 외부 비공개)
 │  ├─ schemas/
-│  │  ├─ pipeline.py             # Profile, PipelineInput/Output, Chunk, PolicyItem
+│  │  ├─ pipeline.py             # Profile, PipelineInput/Output, Chunk, PolicyItem, PUBLIC_TRACE_KEYS
 │  │  ├─ analysis.py             [+ 7주차] LLM 구조화 출력
-│  │  └─ api.py                  [+ 6주차] 채팅 API 요청/응답
-│  ├─ models/                    [+ 6주차] SQLAlchemy 채팅 테이블 모델
+│  │  └─ chat.py                 # 채팅 API 요청·응답
 │  ├─ llm/
 │  │  └─ client.py               # embed(), chat() — OpenAI 호출의 유일한 통로
 │  ├─ pipeline/                  # RAG 로직 (DB 쓰기 없음)
@@ -147,13 +148,13 @@ YouthLink_RAG/
 │  │  │  └─ rerank.py            [+ 12~13주차]
 │  │  ├─ grouping.py             # 청크 → 정책 단위 묶기
 │  │  └─ generator.py            # 프롬프트 조립 + 답변 생성
-│  ├─ services/                  [+ 6주차]
-│  │  └─ chat_service.py         # 상태 조회 → 파이프라인 → 저장
+│  ├─ services/
+│  │  └─ chat_service.py         # 소유 확인 → 파이프라인 → 한 트랜잭션 저장
 │  ├─ repositories/
 │  │  ├─ vector_repository.py    # policy_chunk 벡터 검색 (읽기)
 │  │  ├─ policy_repository.py    # policy 조회 (읽기)
 │  │  ├─ common_code_repository.py  # common_code 코드 → 이름 조회 (읽기)
-│  │  └─ chat_repository.py      [+ 6주차] chat_* 테이블 (읽기·쓰기)
+│  │  └─ chat_repository.py      # 채팅 테이블 읽기·쓰기 (SQLAlchemy Core, ORM 모델 없음)
 │  └─ prompts/
 │     ├─ generate_v1.md
 │     └─ analyze_v1.md           [+ 7주차]
@@ -231,41 +232,60 @@ POST /internal/pipeline   PipelineInput → PipelineOutput (저장 없음)
 
 ### 4-2. 채팅 API (Spring이 호출, 외부 비공개)
 ```
-POST /api/rooms                     채팅방 생성 (user_id, profile) → room_id
-GET  /api/rooms?user_id=...         사용자의 채팅방 목록
-GET  /api/rooms/{room_id}/messages  대화 기록 조회
-POST /api/rooms/{room_id}/messages  질문 전송 (user_id, question, action)
+POST /api/rooms                              채팅방 생성 (user_id, profile) → 201, room_id
+GET  /api/rooms?user_id=...                  사용자의 채팅방 목록 (최근 대화 순)
+GET  /api/rooms/{room_id}/messages?user_id=  대화 기록 조회
+POST /api/rooms/{room_id}/messages           질문 전송 (user_id, question)
 ```
-질문 전송 응답:
+질문 전송 응답 (6주차 확정):
 ```json
 {
-  "message_id": "...",
+  "message_id": 14,
   "answer": "...",
-  "sources": [{ "policy_no": "...", "policy_name": "...", "url": "..." }],
-  "shown_policy_ids": ["..."]
+  "policies": [
+    { "policy_no": "...", "policy_name": "...", "application_start_date": "2026-10-01",
+      "application_end_date": "2026-10-31", "application_url": "...", "score": 0.82 }
+  ]
 }
 ```
+대화 기록 조회 응답:
+```json
+{
+  "messages": [
+    { "message_id": 13, "role": "user", "content": "...", "created_at": "...", "policies": [] },
+    { "message_id": 14, "role": "assistant", "content": "...", "created_at": "...", "policies": [ ... ] }
+  ]
+}
+```
+- `policies`는 `/internal/pipeline`과 같은 `PolicyItem`. 배열 순서가 카드 순서이고 `message_policy_ref.display_order`(1부터)로 저장된다
+- 기록 조회의 `policies`는 저장된 순서로 복원하되, 이름·날짜·URL은 조회 시점의 `policy` 값이다
+- 프로필은 채팅방 생성 때만 받는다 (5-3). trace와 `metadata`는 응답에 넣지 않는다
+- 오류: 없는 채팅방·다른 사용자의 채팅방 404 (구분하지 않음), 요청 검증 422, OpenAI·DB 실패 503
 - Spring 연동 전에는 Swagger와 테스트 스크립트로 직접 호출하고, 연동 후에는 Spring이 호출한다
 - 프론트에 보여줄 API 형식은 Spring이 정한다. RAG 채팅 API 형식과 같을 필요는 없다
-- 질문 전송 응답 형식은 채팅 저장 구현 전에 확정한다 (6주차)
 
 ---
 
 ## 5. 채팅 데이터 모델 (ETL 담당 ERD 기준)
 
-### 5-1. 현재 ERD
+### 5-1. 현재 ERD (ETL 마이그레이션 008 반영, 6주차)
 ```
-chat_room           room_id(UUID), title, created_at, updated_at
-chat_profile        room_id(PK,FK), age, gender, region_code, marriage_status_code,
-                    annual_income, major_code, job_code, school_code,
-                    special_target_code, extra_profile(JSONB), updated_at
-chat_message        message_id(BIGINT), room_id(FK), role, content, created_at
-message_policy_ref  message_id(PK,FK), policy_no(PK,FK), relevance_score
+chat_room            room_id(UUID), user_id, title, created_at, updated_at
+                     인덱스 (user_id, updated_at DESC)
+chat_profile         room_id(PK,FK), age, gender, region_code, marriage_status_code,
+                     annual_income, major_code, job_code, school_code,
+                     special_target_code, extra_profile(JSONB), updated_at
+chat_message         message_id(BIGINT), room_id(FK), role, content, metadata(JSONB), created_at
+message_policy_ref   message_id(PK,FK), policy_no(PK,FK), relevance_score, display_order
+                     UNIQUE (message_id, display_order), display_order >= 1
+chat_current_policy  room_id(PK,FK), policy_no(PK,FK), display_order    ← 7주차부터 갱신
 ```
-- `message_policy_ref`가 "답변에 등장한 정책 ID"를 정규화된 형태로 저장 → 대화 상태의 "직전에 보여준 정책 목록"으로 사용
+- `message_policy_ref`가 답변에 보여준 정책과 순서를 저장 → 대화 상태의 "직전에 보여준 정책 목록"으로 사용
+- `chat_message.metadata`: 질문은 사용자가 보낸 것(버튼 입력 등, 6주차는 `{}`), 답변은 만든 과정(가벼운 trace 키 + `retrieved_chunks`의 `policy_no`·`chunk_type`·`chunk_index`·`score`). 근거 원문은 저장하지 않음
+- 한 턴(질문, 답변, 정책, `updated_at`)은 답변까지 성공한 뒤 한 트랜잭션으로 저장. 같은 턴의 메시지는 `created_at`이 같아 순서는 `message_id`로 보장
 
 ### 5-2. 추가 확인 필요
-- 마감 정책을 삭제하는지 보관하는지 (`message_policy_ref`가 `policy`를 FK로 참조)
+- 마감 정책을 삭제하는지 보관하는지 (`message_policy_ref`가 `policy`를 FK로 참조). 6주차 확인: ETL은 정책을 삭제하지 않음 (사라진 정책 비활성화도 미구현). 삭제하면 과거 대화의 정책 연결도 CASCADE로 사라지므로 비활성화가 유리 (ETL PR #5에 전달)
 - 첨부파일 출처 청크의 원본 파일명/URL 저장 여부 (답변 출처 표시용)
 
 ### 5-3. 운영 원칙
@@ -274,7 +294,11 @@ message_policy_ref  message_id(PK,FK), policy_no(PK,FK), relevance_score
   - RAG 서버는 로그인·인증을 하지 않고, Spring이 넘긴 값과 채팅방의 값만 비교한다. 다르면 404
   - 컬럼 이름은 `user_id` (6주차 결정). Spring이 세션·로그인 어느 방식을 쓰든 RAG는 사용자 식별값만 받는다. RAG에는 사용자 테이블이 없어 FK는 두지 않는다
   - `chat_room.user_id`는 처음부터 `NOT NULL` + 인덱스 (나중에 추가하면 기존 채팅방 보정과 API 명세 변경 필요)
-- 개인정보 보관 기간 정의 (회원 탈퇴 시 삭제 등)
+- 채팅방 프로필 (6주차 결정)
+  - 채팅방을 만들 때 한 번 받고 **이후 수정하지 않는다**. 질문 전송 요청은 프로필을 받지 않고, RAG가 `chat_profile`에서 읽는다
+  - 이유: 채팅방 하나의 모든 답변이 같은 조건 기준이 된다. 중간에 바꾸면 이전 답변(자격 안내 등)이 현재 프로필과 어긋난 채 기록에 남는다. 조건이 바뀌면 사실상 다른 상담이라 새 채팅방이 자연스럽다
+  - 회원·세션 프로필의 원본은 Spring에 있고 언제든 수정할 수 있다. `chat_profile`은 채팅방 생성 당시의 복사본(스냅샷)이라 동기화하지 않는다. 회원 프로필 변경은 다음 채팅방부터 반영된다
+- 개인정보 보관 기간 정의 (회원 탈퇴 시 삭제, 세션 사용자의 오래된 채팅방 정리 등)
 
 ---
 
@@ -355,7 +379,7 @@ LLM이 질문을 분석해 intent를 분류하고(**LLM 기반 쿼리 라우팅*
 | 화제 전환 | 현재 정책 초기화 또는 교체 |
 | 여러 정책 중 "그 정책" | 현재 정책 우선, 없으면 되묻기 |
 | 현재 정책이 여러 개일 때 이름 없는 후속 질문 | 정할 것 (전부 답변 / 되묻기, 최대 개수) |
-| 프로필과 대화 충돌 | 이번 답변은 대화 우선, 프로필 수정 여부 되묻기 |
+| 프로필과 대화 충돌 | 이번 답변은 대화 우선, 계속 반영하려면 새 채팅방 안내 (채팅방 프로필은 수정 불가, 5-3) |
 | 저장된 정책 마감/수정 | 조회 시 최신 상태 재확인 |
 
 ### 8-5. 복합 질문 처리 (정할 것, 7주차)
@@ -645,8 +669,8 @@ LLM이 질문을 분석해 intent를 분류하고(**LLM 기반 쿼리 라우팅*
 
 | 서버 | 맡는 것 | 맡지 않는 것 |
 |---|---|---|
-| Spring | 로그인, 사용자 관리, 프론트 요청 중계, 사용자 식별값 전달 | 채팅 저장·조회, 대화 상태 |
-| RAG | 채팅 저장·조회, 대화 상태, 질문 이해·검색·답변 생성 | 로그인, 인증 |
+| Spring | 로그인, 사용자 관리, 회원·세션 프로필 원본, 프론트 요청 중계, 사용자 식별값 전달 | 채팅 저장·조회, 대화 상태, 채팅 테이블 접근 |
+| RAG | 채팅 저장·조회, 채팅방 프로필(생성 시 복사, 수정 불가), 대화 상태, 질문 이해·검색·답변 생성 | 로그인, 인증 |
 
 **원래 계획에서 바꾼 이유**: 원래는 Spring 추가 후 채팅 저장을 Spring으로 옮길 계획이었다(Phase 2). 그러나 대화 상태(현재 정책, 보여준 정책 순서, 질문 분석 결과)는 RAG의 질문 분석 규칙을 위한 정보다. Spring이 저장하면 매 질문마다 Spring이 RAG 전용 상태를 조회해 넘기고 다시 받아 저장해야 하며, RAG가 상태 항목을 바꿀 때마다 Spring 코드와 API 계약도 함께 바뀐다. 그래서 채팅 저장·조회는 RAG에 두고, Spring은 사용자와 로그인만 맡는다. 채팅 테이블 이전 작업도 없어진다.
 
@@ -659,6 +683,8 @@ LLM이 질문을 분석해 intent를 분류하고(**LLM 기반 쿼리 라우팅*
    - Spring은 `user_id`를 프론트 요청 값이 아니라 인증 정보(세션, 토큰)에서 꺼낸다
    - Spring ↔ RAG 호출에 호출자 확인(예: 공유 API 키 헤더)을 둔다 (연동 시 추가)
    - RAG가 토큰을 직접 검증하지 않는 이유: Spring의 서명 키와 토큰 형식을 알아야 해 두 서버가 다시 묶임
+5. Spring은 채팅 테이블에 직접 접근하지 않는다. 채팅방 정보가 필요하면 RAG API로 받는다 (1-3)
+6. Spring은 채팅방을 만들 때 회원·세션 프로필을 채워 넘긴다. 프로필은 RAG `Profile`과 같은 코드 체계(온통청년 `common_code`, VWorld 시군구 코드)로 저장해야 변환 없이 넘길 수 있다
 
 ### 15-3. 연동 절차
 
@@ -674,6 +700,8 @@ LLM이 질문을 분석해 intent를 분류하고(**LLM 기반 쿼리 라우팅*
 - Spring → RAG 타임아웃 넉넉히 (답변 생성에 수 초)
 - RAG API 호출 주체 제한 (Spring, 평가 서버)
 - 회원 탈퇴 시 대화 삭제: Spring이 RAG에 삭제를 요청하는 API가 필요할 수 있음
+- 세션(비회원) 사용자의 채팅방: 세션이 끝나면 다시 열 수 없는 데이터로 남음. 오래된 채팅방 정리 규칙(예: 마지막 대화 후 N일) 필요
+- 채팅방 프로필 조회: 프론트가 "이 채팅방의 조건"을 보여줘야 하면 RAG API로 제공 (예: `GET /api/rooms/{room_id}`에 `profile` 포함). 요구가 생기면 추가
 
 ---
 

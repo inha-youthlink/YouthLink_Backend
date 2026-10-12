@@ -148,10 +148,10 @@ RAG 평가 서버(RAGAS)가 `POST /internal/pipeline?debug=true`로 채점한다
 
 ### API ([design.md](../design.md) 4-2)
 ```
-POST /api/rooms                     채팅방 생성 (user_id, profile) → room_id
-GET  /api/rooms?user_id=...         사용자의 채팅방 목록
-GET  /api/rooms/{room_id}/messages  대화 기록 조회
-POST /api/rooms/{room_id}/messages  질문 전송 (user_id, question, action)
+POST /api/rooms                              채팅방 생성 (user_id, profile) → 201, room_id
+GET  /api/rooms?user_id=...                  사용자의 채팅방 목록 (최근 대화 순)
+GET  /api/rooms/{room_id}/messages?user_id=  대화 기록 조회
+POST /api/rooms/{room_id}/messages           질문 전송 (user_id, question)
 ```
 
 ### 처리 흐름
@@ -160,10 +160,10 @@ POST /api/rooms/{room_id}/messages
   → api/rooms.py                  요청 검증
   → services/chat_service.py
       1. 사용자-채팅방 소유 확인 (다르면 404)        chat_repository
-      2. 프로필, 최근 대화, 현재 정책 목록 조회        chat_repository
-      3. PipelineInput 구성 → run_pipeline()       5주차 흐름 + 대화 기록
-      4. 메시지, metadata, message_policy_ref 저장  chat_repository
-  → 응답 (answer, sources 등)
+      2. 채팅방 프로필 조회                         chat_repository
+      3. PipelineInput(질문, 프로필) → run_pipeline() 5주차 흐름 그대로 (대화 기록은 7주차)
+      4. 질문·답변·metadata·message_policy_ref·updated_at 한 트랜잭션 저장   chat_repository
+  → 응답 (message_id, answer, policies)
 ```
 - `POST /internal/pipeline`은 그대로 유지한다 (저장 없음, 평가·디버깅용)
 
@@ -202,7 +202,7 @@ POST /api/rooms/{room_id}/messages
 - [ ] 신청 상태 확인용 질문 세트 초안 (7주차 우선순위 준비)
 - [x] ERD 변경 이슈·PR (ETL 저장소): [이슈 #4](https://github.com/inha-youthlink/youthlink-data-pipeline/issues/4), [PR #5](https://github.com/inha-youthlink/youthlink-data-pipeline/pull/5)
 - [x] 채팅 API 요청·응답 형식 확정 (7절 "구현 전에 정할 것")
-- [ ] 채팅 저장 계층: 채팅방 생성, 질문 전송·저장, 기록 조회
+- [x] 채팅 저장 계층: 채팅방 생성, 질문 전송·저장, 기록 조회, 채팅방 목록 (`feature-chat-storage`)
 - [x] [design.md](../design.md) 갱신: 채팅 테이블 소유(1-3), 디렉터리 구조의 Alembic 제거(3-1), 지역 코드 계약(1-1)
 
 대기
@@ -224,3 +224,10 @@ POST /api/rooms/{room_id}/messages
 - 1차 필터링은 6주차에 "지역이 빠지면 효과가 작다"는 이유로 미뤘으나, 신청 상태를 첫 조건으로 두면 지역 없이도 의미가 있다. 상태는 코드로 정확히 판정되고 ETL 답변을 기다리지 않아도 된다. 신청 상태 우선순위와 구현 방식(`policy_ids`)이 같아 함께 만든다
 - 대기: 지역 코드 반영 (ETL #3 종료 후, `v_policy_region_scope` 활용 검토)
 - ~8주차: 자격 확인·비교 핸들러, 관련성 판정
+
+**6주차 채팅 저장 확인에서 본 것** (10-12, 5주차 가짜 데이터, 실제 파이프라인)
+| 관찰 | 내용 | 7주차 작업 |
+|---|---|---|
+| "두 번째 정책"을 엉뚱하게 해석 | "서울 주거 지원 정책 알려줘" 다음 "두 번째 정책 신청 방법은?"에 이번 검색의 두 번째(청년 1:1 취업 컨설팅)로 답함. 의도는 직전 답변의 두 번째 카드(청년 이사비 지원). 파이프라인이 아직 대화 기록을 받지 않아 생긴 예상된 결과 (5주차 F2와 같음). 필요한 데이터(`display_order=2`)는 저장됨 | 1 질문 분석, 5 현재 정책 상태 |
+| 카드 순서와 본문 순서가 다름 | 카드는 주거 상담 센터 → 이사비 지원 순, 본문은 월세 지원 → 이사비 지원 순 | 2 신청 상태 우선순위 (순서를 코드로 정하고 본문이 따르게) |
+| 관련 없는 카드가 섞임 | 주거 질문에 대중교통비, 구직활동 응원금, 신용회복 지원이 카드로 나옴. 검색된 정책이 전부 카드가 되기 때문 | 4 핸들러 확장 (소개한 정책만 카드로), 8주차 관련성 판정 |

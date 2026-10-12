@@ -6,23 +6,11 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.dependencies import PipelineDeps, get_pipeline_deps
 from app.pipeline.runner import run_pipeline
-from app.schemas.pipeline import PipelineInput, PipelineOutput
+from app.schemas.pipeline import PUBLIC_TRACE_KEYS, PipelineInput, PipelineOutput
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/internal", tags=["internal"])
-
-# 근거 원문, 청크 정보 같은 내부 정보가 서비스 응답에 나가지 않도록 허용한 키만 남김
-# 허용 목록이라 새 trace 키는 여기 추가하기 전까지 debug 응답에만 포함됨
-PUBLIC_TRACE_KEYS = frozenset({
-    "latency_ms",
-    "tokens",
-    "chat_model",
-    "retriever",
-    "top_k",
-    "prompt_version",
-    "embedding_model",
-})
 
 
 @router.post("/pipeline", response_model=PipelineOutput)
