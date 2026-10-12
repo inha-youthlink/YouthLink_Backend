@@ -5,6 +5,7 @@ from fastapi import Depends, Request
 from app.core.config import Settings, get_settings
 from app.llm.client import LLMClient
 from app.pipeline.retrieval.base import Retriever
+from app.repositories.chat_repository import ChatRepository
 from app.repositories.common_code_repository import CommonCodeRepository
 from app.repositories.policy_repository import PolicyRepository
 
@@ -33,6 +34,10 @@ def get_policy_repository(request: Request) -> PolicyRepository:
 
 def get_common_code_repository(request: Request) -> CommonCodeRepository:
     return request.app.state.common_code_repository
+
+
+def get_chat_repository(request: Request) -> ChatRepository:
+    return request.app.state.chat_repository
 
 
 def get_pipeline_deps(
