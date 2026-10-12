@@ -43,6 +43,7 @@ async def handle(ctx: PipelineContext) -> PipelineOutput:
                 "chunk_id": str(chunk.chunk_id),
                 "policy_no": chunk.policy_no,
                 "chunk_type": chunk.chunk_type,
+                "chunk_index": chunk.chunk_index,
                 "score": chunk.score,
                 "content": chunk.content,
             }

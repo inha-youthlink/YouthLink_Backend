@@ -84,7 +84,7 @@ RAG 평가·디버깅용입니다. 근거 원문 같은 내부 정보는 debug �
 | `POST /internal/pipeline?debug=true` | 위 키 + `contexts`, `retrieved_chunks` |
 
 - `contexts`: LLM에 넘긴 정책별 근거 블록 (`list[str]`). 정책 정보(신청 상태, 신청 방법 등)와 청크 본문이 함께 들어 있습니다. 검색된 정책이 없으면 `[]`
-- `retrieved_chunks`: 검색된 청크 목록 (`chunk_id`, `policy_no`, `chunk_type`, `score`, `content`), 검색 점수순
+- `retrieved_chunks`: 검색된 청크 목록 (`chunk_id`, `policy_no`, `chunk_type`, `chunk_index`, `score`, `content`), 검색 점수순
 
 ## 디렉터리 구조
 
