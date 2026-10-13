@@ -181,7 +181,7 @@ POST /api/rooms/{room_id}/messages
 | [ETL #2](https://github.com/inha-youthlink/youthlink-data-pipeline/issues/2) 신청기간 파싱 예외 | 006에서 대응됨 (이슈는 열려 있음). 기간 두 개인 정책은 RAG 판정 필요 (7주차) | |
 | ERD 변경 PR 리뷰 | 채팅 저장 머지 | 로컬 DB에 마이그레이션 먼저 적용 |
 
-- ETL 변경 영향 정리: `notes/6주차관련/ETL_변경영향.md`. RAG 코드가 깨지는 곳은 없음
+- ETL 변경(005~007)으로 RAG 코드가 깨지는 곳은 없음
 
 ## 9. 확인 환경
 
@@ -198,11 +198,12 @@ POST /api/rooms/{room_id}/messages
 - [x] ETL 이슈 등록: 인천 코드 보정 (#3), 신청기간 파싱 예외 (#2)
 - [x] 마감 코드 판정·표시 수정 (PR #16)
 - [ ] ~~가짜 데이터에 마감 코드 정책 추가~~ → 실제 데이터로 대체
-- [ ] 실제 데이터로 로컬 DB 구성
-- [ ] 신청 상태 확인용 질문 세트 초안 (7주차 우선순위 준비)
+- [ ] 실제 데이터로 로컬 DB 구성 → **7주차로 이월**
+- [ ] 신청 상태 확인용 질문 세트 초안 (7주차 우선순위 준비) → **7주차로 이월**
 - [x] ERD 변경 이슈·PR (ETL 저장소): [이슈 #4](https://github.com/inha-youthlink/youthlink-data-pipeline/issues/4), [PR #5](https://github.com/inha-youthlink/youthlink-data-pipeline/pull/5)
 - [x] 채팅 API 요청·응답 형식 확정 (7절 "구현 전에 정할 것")
-- [x] 채팅 저장 계층: 채팅방 생성, 질문 전송·저장, 기록 조회, 채팅방 목록 (`feature-chat-storage`)
+- [x] 채팅 저장 계층: 채팅방 생성, 질문 전송·저장, 기록 조회, 채팅방 목록 (PR #18)
+- [x] 채팅 저장소 통합 테스트 10개 (`test-chat-repository`, 계획 외 추가)
 - [x] [design.md](../design.md) 갱신: 채팅 테이블 소유(1-3), 디렉터리 구조의 Alembic 제거(3-1), 지역 코드 계약(1-1)
 
 대기
