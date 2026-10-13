@@ -49,6 +49,16 @@ uv run uvicorn app.main:app --reload
 - API 문서 (Swagger UI): http://127.0.0.1:8000/docs
 - API 문서 (ReDoc): http://127.0.0.1:8000/redoc
 
+### 테스트
+
+```bash
+uv run pytest
+```
+
+- 채팅 저장소 테스트는 실제 PostgreSQL에 테스트 전용 DB를 만들어 시험하고, 끝나면 삭제합니다. `.env`에 `TEST_DATABASE_URL`을 넣어 주세요 (DB 이름은 `_test`로 끝나야 함, 예: `.../youthlink_test`).
+- `TEST_DATABASE_URL`이 없거나 DB에 연결할 수 없으면 DB 테스트는 건너뜁니다.
+- 테스트 DB 스키마는 ETL `db/schema.sql`의 복사본(`tests/sql/`)입니다. ETL 스키마가 바뀌면 함께 갱신합니다.
+
 ## API
 
 | Method | Path | 설명 |
