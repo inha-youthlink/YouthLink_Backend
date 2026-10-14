@@ -1,6 +1,7 @@
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
 from openai import OpenAIError
 from pydantic import ValidationError
@@ -42,6 +43,25 @@ class AnalysisResult:
     model: str
     prompt_tokens: int = 0
     completion_tokens: int = 0
+
+    def to_trace(self) -> dict[str, Any]:
+        return {
+            "prompt_version": self.prompt_version,
+            "model": self.model,
+            "tokens": {"prompt": self.prompt_tokens, "completion": self.completion_tokens},
+            "sub_queries": [
+                {
+                    "standalone_question": sub.standalone_question,
+                    "target_refs": sub.target_refs,
+                    "target_policy_nos": sub.target_policy_nos,
+                    "intent": sub.intent.value,
+                    "status_filter": sub.status_filter.value,
+                }
+                for sub in self.sub_queries
+            ],
+            "is_new_topic": self.is_new_topic,
+            "fallback_reason": self.fallback_reason.value if self.fallback_reason else None,
+        }
 
     # 하위 질문이 여럿이면 원래 질문 대신 맥락이 풀린 질문을 이어 붙여 지시어·배경 설명을 피함
     def search_query(self, original: str) -> str:

@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from openai import OpenAIError
 
@@ -162,3 +164,39 @@ async def test_empty_result_is_schema_error(parsed):
     assert result.is_new_topic is False
     assert (result.prompt_tokens, result.completion_tokens) == (100, 5)
     assert result.search_query("원래 질문") == "원래 질문"
+
+
+# trace는 채팅 metadata(JSONB)와 API 응답에 그대로 들어가므로 JSON 값만 남는지 확인함
+async def test_trace_after_success():
+    inp = PipelineInput(
+        question="두 번째 거 신청 방법은?",
+        history=[ConversationTurn(question="q", answer="a", policies=[MONTHLY_RENT, MOVING])],
+    )
+    llm = FakeLLM(_parsed(_sub("청년 이사비 지원 신청 방법", ["2", "9"])))
+
+    trace = (await analyzer.analyze(_ctx(inp, llm))).to_trace()
+
+    assert json.loads(json.dumps(trace)) == {
+        "prompt_version": "analyze_v1",
+        "model": "fake-analysis-model",
+        "tokens": {"prompt": 100, "completion": 20},
+        "sub_queries": [{
+            "standalone_question": "청년 이사비 지원 신청 방법",
+            "target_refs": ["2", "9"],
+            "target_policy_nos": [MOVING.policy_no],
+            "intent": "policy_detail",
+            "status_filter": "none",
+        }],
+        "is_new_topic": False,
+        "fallback_reason": None,
+    }
+
+
+async def test_trace_after_failure():
+    llm = FakeLLM(error=OpenAIError("timeout"))
+
+    trace = (await analyzer.analyze(_ctx(PipelineInput(question="원래 질문"), llm))).to_trace()
+
+    assert trace["sub_queries"] == []
+    assert trace["fallback_reason"] == "llm_error"
+    assert trace["tokens"] == {"prompt": 0, "completion": 0}

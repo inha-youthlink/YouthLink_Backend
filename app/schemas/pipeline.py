@@ -73,4 +73,6 @@ PUBLIC_TRACE_KEYS = frozenset({
     "top_k",
     "prompt_version",
     "embedding_model",
+    "handler",
+    "analysis",
 })
