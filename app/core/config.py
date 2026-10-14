@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     retriever: str = "vector"
     top_k: int = Field(default=10, ge=1)
 
+    # Conversation
+    history_turns: int = Field(default=3, ge=0)
+
+    # Analysis
+    analysis_model: str | None = None
+    analysis_answer_max_chars: int = Field(default=300, ge=0)
+    # 분석은 실패해도 원래 질문으로 진행하므로 답변 호출보다 짧게 두고 재시도하지 않음
+    analysis_timeout: float = Field(default=10.0, gt=0)
+
 
 @lru_cache
 def get_settings() -> Settings:
