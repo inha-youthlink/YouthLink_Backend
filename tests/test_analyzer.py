@@ -177,7 +177,7 @@ async def test_trace_after_success():
     trace = (await analyzer.analyze(_ctx(inp, llm))).to_trace()
 
     assert json.loads(json.dumps(trace)) == {
-        "prompt_version": "analyze_v1",
+        "prompt_version": "analyze_v2",
         "model": "fake-analysis-model",
         "tokens": {"prompt": 100, "completion": 20},
         "sub_queries": [{
