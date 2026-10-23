@@ -1,5 +1,5 @@
 [project]
-name = "youthlink-rag"
+name = "youthlink-backend"
 version = "0.1.0"
 description = "YouthLink RAG 기반 청년 지원 챗봇 및 신청 가이드 시스템"
 readme = "README.md"

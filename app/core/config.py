@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     )
 
     # App
-    app_name: str = "YouthLink RAG"
+    app_name: str = "YouthLink Backend"
     app_env: Literal["local", "dev", "prod"] = "local"
     debug: bool = False
 

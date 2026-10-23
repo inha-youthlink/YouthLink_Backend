@@ -990,7 +990,7 @@ wheels = [
 ]
 
 [[package]]
-name = "youthlink-rag"
+name = "youthlink-backend"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
