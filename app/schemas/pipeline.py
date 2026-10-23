@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.policy_info import ApplicationStatus
+
 
 class Profile(BaseModel):
     age: int | None = Field(default=None, ge=0)
@@ -26,7 +28,7 @@ class ConversationTurn(BaseModel):
     question: str
     # 자르는 길이는 단계마다 달라 전문을 받고 쓰는 쪽에서 자름
     answer: str
-    # 목록 순서가 카드 순서이며, 턴마다 두어 후보 범위를 넓혀도 입력 형태가 그대로임
+    # 목록 순서가 카드 순서
     policies: list[PolicyRef] = Field(default_factory=list)
 
 
@@ -54,6 +56,9 @@ class PolicyItem(BaseModel):
     application_end_date: date | None = None
     application_url: str | None = None
     score: float
+    # 날짜만으로는 상시·마감 코드·정보 없음을 구분할 수 없어 서버가 계산한 상태를 함께 줌
+    application_status: ApplicationStatus | None = None
+    supervising_org_name: str | None = None
 
 
 class PipelineOutput(BaseModel):

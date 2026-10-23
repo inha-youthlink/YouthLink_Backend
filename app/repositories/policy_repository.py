@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 _GET_BY_IDS_SQL = text("""
 SELECT policy_no, policy_name,
        application_period_type_code, application_start_date, application_end_date,
-       application_url
+       application_url, reference_url_1, reference_url_2, supervising_org_name
 FROM policy
 WHERE policy_no = ANY(:policy_nos)
 """)
@@ -28,6 +28,9 @@ class PolicyRecord:
     application_start_date: date | None
     application_end_date: date | None
     application_url: str | None
+    reference_url_1: str | None
+    reference_url_2: str | None
+    supervising_org_name: str | None
 
 
 class PolicyRepository:
@@ -43,7 +46,7 @@ class PolicyRepository:
             result = await session.execute(_GET_BY_IDS_SQL, {"policy_nos": policy_nos})
             return {row["policy_no"]: PolicyRecord(**row) for row in result.mappings()}
 
-    # ETL 청크가 정책 원본 필드를 지역명·코드명까지 풀어 쓴 것이라, 정책 전체 근거로 검색 여부와 관계없이 모든 청크를 씀
+    # 청크가 정책 원본 전체를 풀어 쓴 것이라, 검색된 청크만이 아니라 정책 전체를 근거로 씀
     async def get_documents(self, policy_nos: list[str]) -> dict[str, list[str]]:
         if not policy_nos:
             return {}

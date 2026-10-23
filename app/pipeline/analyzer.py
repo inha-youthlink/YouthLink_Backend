@@ -27,9 +27,9 @@ class FallbackReason(StrEnum):
 @dataclass(frozen=True)
 class ResolvedSubQuery:
     standalone_question: str
-    # 검증 전 LLM 출력을 남겨 target_policy_nos와 다르면 지목 오류로 볼 수 있음
+    # 검증 전 값. target_policy_nos와 비교해 지목 오류를 찾음
     target_refs: list[str]
-    # 후보 규칙을 이 파일에만 두려고 이름까지 담아 넘김 (현재 정책 갱신이 다시 찾지 않음)
+    # 현재 정책 갱신이 후보를 다시 찾지 않도록 이름까지 담음
     targets: list[PolicyRef]
     intent: Intent
     status_filter: StatusFilter

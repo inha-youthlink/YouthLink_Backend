@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.chat import MessageItem, RoomItem
 from app.schemas.pipeline import ConversationTurn, PolicyItem, PolicyRef, Profile
+from app.schemas.policy_info import application_status, clean_url, today_kst
 
 _INSERT_ROOM_SQL = text("""
 INSERT INTO chat_room (user_id)
@@ -53,7 +54,8 @@ ORDER BY created_at, message_id
 
 _LIST_POLICY_REFS_SQL = text("""
 SELECT r.message_id, p.policy_no, p.policy_name,
-       p.application_start_date, p.application_end_date, p.application_url,
+       p.application_period_type_code, p.application_start_date, p.application_end_date,
+       p.application_url, p.supervising_org_name,
        r.relevance_score AS score
 FROM message_policy_ref r
 JOIN policy p ON p.policy_no = r.policy_no
@@ -154,11 +156,27 @@ class ChatRepository:
         if not message_ids:
             return {}
 
+        # 지난 카드도 지금 신청 가능한지를 보여 주려고 조회 시점 기준으로 계산함
+        today = today_kst()
         refs: dict[int, list[PolicyItem]] = {}
         async with self._session_factory() as session:
             result = await session.execute(_LIST_POLICY_REFS_SQL, {"message_ids": message_ids})
             for row in result.mappings():
-                refs.setdefault(row["message_id"], []).append(PolicyItem.model_validate(row))
+                refs.setdefault(row["message_id"], []).append(PolicyItem(
+                    policy_no=row["policy_no"],
+                    policy_name=row["policy_name"],
+                    application_start_date=row["application_start_date"],
+                    application_end_date=row["application_end_date"],
+                    application_url=clean_url(row["application_url"]),
+                    score=row["score"],
+                    application_status=application_status(
+                        row["application_period_type_code"],
+                        row["application_start_date"],
+                        row["application_end_date"],
+                        today,
+                    ),
+                    supervising_org_name=row["supervising_org_name"],
+                ))
         return refs
 
     async def list_recent_turns(self, room_id: UUID, turns: int) -> list[ConversationTurn]:

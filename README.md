@@ -85,6 +85,9 @@ uv run pytest
 
 - `profile`은 생략할 수 있고, 각 항목도 모두 선택입니다.
 - 응답은 `answer`(답변), `policies`(카드로 보여 줄 정책, 답변 본문과 같은 순서), `trace`(실행 정보)로 구성됩니다.
+- `policies`의 각 카드: `policy_no`, `policy_name`, `application_start_date`, `application_end_date`, `application_url`, `score`, `application_status`, `supervising_org_name`
+  - `application_status`: 서버가 계산한 신청 상태 `OPEN`(신청 가능) / `ALWAYS_OPEN`(상시 모집) / `UPCOMING`(신청 예정) / `CLOSED`(마감) / `UNKNOWN`(기간 정보 없음). 마감 코드 정책은 기간이 남아 있어도 `CLOSED`라, 날짜는 `OPEN`·`UPCOMING`일 때만 표시하는 것을 권장합니다
+  - `application_url`: 원본 신청 링크를 정리한 값(`https://` 보정, 주소가 아닌 값은 `null`). 절반 이상이 사이트 첫 화면이라 버튼 문구는 "관련 사이트"처럼 중립적으로 쓰는 것을 권장합니다
 - 요청 검증 실패는 422, OpenAI·DB 호출 실패는 503을 반환합니다.
 - 자세한 형식은 `/docs`와 [5주차 작업 기록](docs/weekly/week05.md)을 참고하세요. `trace` 구성은 아래 debug 모드 기준입니다.
 
@@ -114,7 +117,7 @@ RAG 평가·디버깅용입니다. 근거 원문 같은 내부 정보는 debug �
 - 채팅방 프로필은 생성할 때만 받고 이후 수정하지 않습니다. 조건이 바뀌면 새 채팅방을 만듭니다.
 - `user_id`가 채팅방 소유자와 다르거나 채팅방이 없으면 404입니다. RAG 서버는 인증하지 않고 `user_id`를 그대로 믿습니다.
 - 질문과 답변은 답변까지 성공한 뒤 한 번에 저장합니다. 실패하면(503) 아무것도 저장하지 않습니다.
-- `policies`는 `/internal/pipeline`과 같은 형식이고, 기록 조회에서도 같은 형식으로 복원됩니다.
+- `policies`는 `/internal/pipeline`과 같은 형식이고, 기록 조회에서도 같은 형식으로 복원됩니다. 신청 상태는 조회 시점 기준으로 다시 계산합니다.
 - 6주차에는 대화를 저장만 하고, 이전 대화를 답변에 활용하는 것은 7주차부터입니다.
 - 채팅 테이블은 ETL 저장소의 마이그레이션 008이 적용된 DB가 필요합니다.
 

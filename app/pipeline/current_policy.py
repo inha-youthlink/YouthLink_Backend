@@ -11,7 +11,7 @@ def update_current_policies(inp: PipelineInput, analysis: AnalysisResult) -> lis
         return inp.current_policies
 
     targets = {policy.policy_no: policy for sub in analysis.sub_queries for policy in sub.targets}
-    # 이전 정책을 남기면 다른 정책으로 넘어간 뒤에도 이름 없는 질문이 여러 개로 애매해져 이번 대상으로 교체함
+    # 이전 정책을 남기면 이름 없는 다음 질문이 애매해져 교체함
     if targets:
         return list(targets.values())[:MAX_CURRENT_POLICIES]
     if analysis.is_new_topic:

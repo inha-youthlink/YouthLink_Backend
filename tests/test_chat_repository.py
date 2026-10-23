@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 
 import pytest
 from sqlalchemy import text
@@ -6,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.repositories.chat_repository import ChatRepository
 from app.schemas.pipeline import PolicyItem, PolicyRef, Profile
+from app.schemas.policy_info import CLOSED_CODE, ApplicationStatus
 from tests.conftest import TEST_POLICY_NOS
 
 USER_ID = "test-user"
@@ -89,6 +91,36 @@ async def test_policy_refs_keep_display_order(chat_repository, session_factory):
         assert result.scalars().all() == [1, 2]
 
 
+async def test_policy_refs_restore_status_and_org(chat_repository, session_factory):
+    policy_no = TEST_POLICY_NOS[2]
+    # 마감 코드인데 기간이 남은 정책: 날짜만 보면 진행 중이지만 상태는 마감이어야 함
+    update = text("""
+        UPDATE policy
+        SET application_period_type_code = :code, application_start_date = :start,
+            application_end_date = :end, application_url = :url, supervising_org_name = :org
+        WHERE policy_no = :no
+    """)
+    async with session_factory() as session, session.begin():
+        await session.execute(update, {
+            "code": CLOSED_CODE, "start": date(2026, 1, 1), "end": date(2099, 12, 31),
+            "url": "www.example.go.kr", "org": "테스트 기관", "no": policy_no,
+        })
+    try:
+        room_id = await chat_repository.create_room(USER_ID, Profile())
+        answer_id = await _save_turn(chat_repository, room_id, "질문", policies=[_policy(policy_no, 0.5)])
+
+        refs = await chat_repository.list_policy_refs([answer_id])
+
+        card = refs[answer_id][0]
+        assert card.application_status == ApplicationStatus.CLOSED
+        assert card.application_end_date == date(2099, 12, 31)
+        assert card.supervising_org_name == "테스트 기관"
+        assert card.application_url == "https://www.example.go.kr"
+    finally:
+        async with session_factory() as session, session.begin():
+            await session.execute(update, {"code": None, "start": None, "end": None, "url": None, "org": None, "no": policy_no})
+
+
 async def test_save_turn_without_policies(chat_repository):
     room_id = await chat_repository.create_room(USER_ID, Profile())
     answer_id = await _save_turn(chat_repository, room_id, "질문")
@@ -141,7 +173,6 @@ async def test_list_rooms_by_user(chat_repository):
 
     # 늦게 만든 방보다 최근에 대화한 방이 위에 옴
     assert [room.room_id for room in rooms] == [older, newer]
-    # 대화가 없는 채팅방은 제목이 없음
     assert (rooms[0].title, rooms[1].title) == ("질문 제목", None)
 
 
@@ -272,7 +303,6 @@ async def test_save_turn_replaces_and_clears_current_policies(chat_repository):
 
     await _save_turn(chat_repository, room_id, "질문3")
     assert await chat_repository.list_current_policies(room_id) == []
-    # 다른 채팅방의 현재 정책은 건드리지 않음
     assert [p.policy_no for p in await chat_repository.list_current_policies(other_id)] == [TEST_POLICY_NOS[0]]
 
 

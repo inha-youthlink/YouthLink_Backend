@@ -5,9 +5,9 @@ from app.core.config import Settings
 from app.core.dependencies import PipelineDeps
 from app.llm.client import ChatResult
 from app.pipeline.context import PipelineContext
-from app.pipeline.generator import CLOSED_CODE
 from app.pipeline.handlers import default_rag
 from app.repositories.policy_repository import PolicyRecord
+from app.schemas.policy_info import CLOSED_CODE
 from app.schemas.pipeline import Chunk, PipelineInput
 
 
@@ -25,13 +25,16 @@ def _record(policy_no: str, code: str | None = None) -> PolicyRecord:
         application_start_date=None,
         application_end_date=None,
         application_url=None,
+        reference_url_1=None,
+        reference_url_2=None,
+        supervising_org_name=None,
     )
 
 
 class FakeRetriever:
     async def retrieve(self, query, policy_ids, k):
-        # 점수는 마감 정책이 가장 높음
-        return [_chunk("P-CLOSED", 0.9), _chunk("P-A", 0.8), _chunk("P-B", 0.7), _chunk("P-C", 0.6)]
+        # 확실한 1위는 상태와 관계없이 남으므로 마감 정책을 2위로 둠
+        return [_chunk("P-A", 0.9), _chunk("P-CLOSED", 0.8), _chunk("P-B", 0.7), _chunk("P-C", 0.6)]
 
 
 class FakePolicyRepository:
@@ -83,12 +86,12 @@ async def test_cards_follow_status_order_and_selection():
 
     output = await default_rag.handle(_ctx("[소개: 1,3]\n1. 정책 P-A\n2. 정책 P-C", repository))
 
-    # 마감 정책은 점수가 가장 높아도 뒤로 밀려 후보 3개에서 빠짐
+    # 마감 정책은 점수가 더 높아도 뒤로 밀려 후보 3개에서 빠짐
     assert repository.document_requests == [["P-A", "P-B", "P-C"]]
     assert [policy.policy_no for policy in output.policies] == ["P-A", "P-C"]
     assert output.answer == "1. 정책 P-A\n2. 정책 P-C"
     assert output.trace["cards"] == {"candidate_nos": ["P-A", "P-B", "P-C"], "selected": [1, 3], "fallback": False}
-    assert output.trace["prompt_version"] == "generate_v2"
+    assert output.trace["prompt_version"] == "generate_v3"
 
 
 async def test_no_cards_when_nothing_selected():

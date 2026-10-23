@@ -1,7 +1,7 @@
 from datetime import date
 
 from app.pipeline.cards import build_cards, pick_candidates
-from app.pipeline.generator import ALWAYS_OPEN_CODE, CLOSED_CODE
+from app.schemas.policy_info import ALWAYS_OPEN_CODE, CLOSED_CODE, ApplicationStatus
 from app.pipeline.grouping import PolicyGroup
 from app.repositories.policy_repository import PolicyRecord
 
@@ -16,6 +16,9 @@ def _record(policy_no: str, code: str | None = None, start: date | None = None, 
         application_start_date=start,
         application_end_date=end,
         application_url=f"https://example.com/{policy_no}",
+        reference_url_1=None,
+        reference_url_2=None,
+        supervising_org_name=f"기관 {policy_no}",
     )
 
 
@@ -47,11 +50,60 @@ def test_candidates_sorted_by_status_then_score():
 
 
 def test_candidates_limited_after_sorting():
-    groups = _groups("CLOSED", "UNKNOWN", "OPEN")
+    groups = _groups("UNKNOWN", "CLOSED", "OPEN")
 
     candidates = pick_candidates(groups, POLICIES, TODAY, limit=2)
 
     assert [c.policy_no for c in candidates] == ["OPEN", "UNKNOWN"]
+
+
+def test_candidates_keep_clear_top_regardless_of_status():
+    # 마감 정책이 2위보다 확실히 높은 1위면 상태 정렬로 밀려도 후보에 남고, 순서는 상태 순
+    groups = [
+        PolicyGroup("CLOSED", 0.79, []),
+        PolicyGroup("OPEN", 0.63, []),
+        PolicyGroup("ALWAYS", 0.62, []),
+        PolicyGroup("UNKNOWN", 0.61, []),
+    ]
+
+    candidates = pick_candidates(groups, POLICIES, TODAY, limit=2)
+
+    assert [c.policy_no for c in candidates] == ["OPEN", "CLOSED"]
+
+
+def test_clear_top_counts_same_name_policies_together():
+    # 같은 이름의 두 공고(마감, 예정)가 1·2위면 둘을 한 묶음으로 보고 다음 정책과 비교해 둘 다 남김
+    policies = {
+        **POLICIES,
+        "NEXT-YEAR": PolicyRecord(
+            policy_no="NEXT-YEAR", policy_name="정책 CLOSED", application_period_type_code=None,
+            application_start_date=date(2026, 12, 1), application_end_date=date(2026, 12, 31),
+            application_url=None, reference_url_1=None, reference_url_2=None, supervising_org_name=None,
+        ),
+    }
+    groups = [
+        PolicyGroup("CLOSED", 0.689, []),
+        PolicyGroup("NEXT-YEAR", 0.666, []),
+        PolicyGroup("OPEN", 0.630, []),
+        PolicyGroup("ALWAYS", 0.618, []),
+    ]
+
+    candidates = pick_candidates(groups, policies, TODAY, limit=3)
+
+    assert [c.policy_no for c in candidates] == ["OPEN", "NEXT-YEAR", "CLOSED"]
+
+
+def test_candidates_follow_status_when_top_is_not_clear():
+    # 점수가 비슷하면 확실한 1위가 없어 신청 가능한 정책이 우선
+    groups = [
+        PolicyGroup("CLOSED", 0.500, []),
+        PolicyGroup("OPEN", 0.495, []),
+        PolicyGroup("ALWAYS", 0.490, []),
+    ]
+
+    candidates = pick_candidates(groups, POLICIES, TODAY, limit=2)
+
+    assert [c.policy_no for c in candidates] == ["OPEN", "ALWAYS"]
 
 
 def test_candidates_skip_policies_without_record():
@@ -65,19 +117,21 @@ def test_candidates_skip_policies_without_record():
 def test_cards_follow_selected_numbers():
     candidates = _groups("OPEN", "ALWAYS", "UPCOMING")
 
-    cards = build_cards(candidates, POLICIES, [1, 3])
+    cards = build_cards(candidates, POLICIES, [1, 3], TODAY)
 
     assert [card.policy_no for card in cards] == ["OPEN", "UPCOMING"]
     assert cards[0].policy_name == "정책 OPEN"
     assert cards[0].application_end_date == date(2026, 10, 31)
     assert cards[1].score == candidates[2].score
+    assert [card.application_status for card in cards] == [ApplicationStatus.OPEN, ApplicationStatus.UPCOMING]
+    assert cards[0].supervising_org_name == "기관 OPEN"
 
 
 def test_cards_empty_when_nothing_selected():
-    assert build_cards(_groups("OPEN", "ALWAYS"), POLICIES, []) == []
+    assert build_cards(_groups("OPEN", "ALWAYS"), POLICIES, [], TODAY) == []
 
 
 def test_cards_fall_back_to_all_candidates():
-    cards = build_cards(_groups("OPEN", "ALWAYS"), POLICIES, None)
+    cards = build_cards(_groups("OPEN", "ALWAYS"), POLICIES, None, TODAY)
 
     assert [card.policy_no for card in cards] == ["OPEN", "ALWAYS"]

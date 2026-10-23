@@ -36,7 +36,7 @@ def get_chat_service(
     return ChatService(chat_repository, pipeline_deps)
 
 
-# 외부 서비스 장애는 원인만 구분해 503으로 알리고, 상세 내용은 서버 로그에만 남김 (/internal/pipeline과 같은 기준)
+# 외부 서비스 장애는 원인만 구분해 503으로 알리고, 상세 내용은 서버 로그에만 남김
 @contextmanager
 def _http_errors() -> Iterator[None]:
     try:
