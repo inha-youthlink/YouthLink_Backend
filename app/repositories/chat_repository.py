@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.chat import MessageItem, RoomItem
-from app.schemas.pipeline import PolicyItem, Profile
+from app.schemas.pipeline import ConversationTurn, PolicyItem, PolicyRef, Profile
 
 _INSERT_ROOM_SQL = text("""
 INSERT INTO chat_room (user_id)
@@ -59,6 +59,27 @@ FROM message_policy_ref r
 JOIN policy p ON p.policy_no = r.policy_no
 WHERE r.message_id = ANY(:message_ids)
 ORDER BY r.message_id, r.display_order
+""")
+
+# 최근 메시지를 역순으로 자른 뒤 다시 시간순으로 돌려 오래된 턴부터 반환함
+_LIST_RECENT_MESSAGES_SQL = text("""
+SELECT message_id, role, content
+FROM (
+    SELECT message_id, role, content, created_at
+    FROM chat_message
+    WHERE room_id = :room_id
+    ORDER BY created_at DESC, message_id DESC
+    LIMIT :limit
+) recent
+ORDER BY created_at, message_id
+""")
+
+_LIST_CURRENT_POLICIES_SQL = text("""
+SELECT c.policy_no, p.policy_name
+FROM chat_current_policy c
+JOIN policy p ON p.policy_no = c.policy_no
+WHERE c.room_id = :room_id
+ORDER BY c.display_order
 """)
 
 _INSERT_MESSAGE_SQL = text("""
@@ -127,6 +148,40 @@ class ChatRepository:
             for row in result.mappings():
                 refs.setdefault(row["message_id"], []).append(PolicyItem.model_validate(row))
         return refs
+
+    async def list_recent_turns(self, room_id: UUID, turns: int) -> list[ConversationTurn]:
+        if turns <= 0:
+            return []
+
+        async with self._session_factory() as session:
+            result = await session.execute(
+                _LIST_RECENT_MESSAGES_SQL, {"room_id": room_id, "limit": turns * 2}
+            )
+            messages = result.mappings().all()
+
+        # save_turn이 질문·답변을 한 트랜잭션에 넣어 방 안에서는 질문 다음에 항상 답변이 옴
+        pairs = [
+            (question, answer)
+            for question, answer in zip(messages[::2], messages[1::2])
+            if question["role"] == "user" and answer["role"] == "assistant"
+        ]
+        refs = await self.list_policy_refs([answer["message_id"] for _, answer in pairs])
+        return [
+            ConversationTurn(
+                question=question["content"],
+                answer=answer["content"],
+                policies=[
+                    PolicyRef(policy_no=policy.policy_no, policy_name=policy.policy_name)
+                    for policy in refs.get(answer["message_id"], [])
+                ],
+            )
+            for question, answer in pairs
+        ]
+
+    async def list_current_policies(self, room_id: UUID) -> list[PolicyRef]:
+        async with self._session_factory() as session:
+            result = await session.execute(_LIST_CURRENT_POLICIES_SQL, {"room_id": room_id})
+            return [PolicyRef.model_validate(row) for row in result.mappings()]
 
     # 답변 없는 질문이나 정책 없는 답변이 남지 않도록 한 턴 전체를 한 트랜잭션으로 저장함
     async def save_turn(

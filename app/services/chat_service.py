@@ -37,10 +37,18 @@ class ChatService:
     # 저장은 답변까지 성공한 뒤에만 함. 파이프라인 예외는 저장 없이 호출 측으로 전달됨
     async def send_message(self, room_id: UUID, request: SendMessageRequest) -> SendMessageResponse:
         room = await self._get_owned_room(room_id, request.user_id)
+        history = await self._chat_repository.list_recent_turns(
+            room_id, self._pipeline_deps.settings.history_turns
+        )
+        current_policies = await self._chat_repository.list_current_policies(room_id)
 
-        # 대화 기록과 상태는 형태가 정해지는 7주차 질문 분석부터 넘김
         output = await run_pipeline(
-            PipelineInput(question=request.question, profile=room.profile),
+            PipelineInput(
+                question=request.question,
+                profile=room.profile,
+                history=history,
+                current_policies=current_policies,
+            ),
             self._pipeline_deps,
         )
 

@@ -17,9 +17,25 @@ class Profile(BaseModel):
     special_target_code: str | None = None
 
 
+class PolicyRef(BaseModel):
+    policy_no: str
+    policy_name: str
+
+
+class ConversationTurn(BaseModel):
+    question: str
+    # 자르는 길이는 단계마다 달라 전문을 받고 쓰는 쪽에서 자름
+    answer: str
+    # 목록 순서가 카드 순서이며, 턴마다 두어 후보 범위를 넓혀도 입력 형태가 그대로임
+    policies: list[PolicyRef] = Field(default_factory=list)
+
+
 class PipelineInput(BaseModel):
     question: str = Field(min_length=1)
     profile: Profile = Field(default_factory=Profile)
+    # 오래된 턴부터. 몇 턴을 넣을지는 호출 측이 정함
+    history: list[ConversationTurn] = Field(default_factory=list)
+    current_policies: list[PolicyRef] = Field(default_factory=list)
 
 
 class Chunk(BaseModel):
@@ -57,4 +73,6 @@ PUBLIC_TRACE_KEYS = frozenset({
     "top_k",
     "prompt_version",
     "embedding_model",
+    "handler",
+    "analysis",
 })

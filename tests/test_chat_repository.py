@@ -163,3 +163,84 @@ async def test_delete_room_cascades(chat_repository, session_factory):
                  + (SELECT count(*) FROM message_policy_ref)
         """))
         assert result.scalar_one() == 0
+
+
+async def test_recent_turns_keep_latest_in_time_order(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    for question in ("질문1", "질문2", "질문3"):
+        await _save_turn(chat_repository, room_id, question)
+
+    turns = await chat_repository.list_recent_turns(room_id, turns=2)
+
+    assert [(t.question, t.answer) for t in turns] == [
+        ("질문2", "질문2 답변"),
+        ("질문3", "질문3 답변"),
+    ]
+
+
+async def test_recent_turns_with_fewer_turns_or_zero(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    await _save_turn(chat_repository, room_id, "질문1")
+
+    assert [t.question for t in await chat_repository.list_recent_turns(room_id, turns=3)] == ["질문1"]
+    assert await chat_repository.list_recent_turns(room_id, turns=0) == []
+
+
+# "두 번째 거"의 기준이라 점수 순서가 아니라 카드 순서로 붙는지 보려고 낮은 점수를 앞에 둠
+async def test_recent_turns_attach_policies_in_card_order(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    await _save_turn(chat_repository, room_id, "질문1", policies=[_policy(TEST_POLICY_NOS[0], 0.9)])
+    await _save_turn(chat_repository, room_id, "질문2", policies=[
+        _policy(TEST_POLICY_NOS[2], 0.3),
+        _policy(TEST_POLICY_NOS[1], 0.8),
+    ])
+    await _save_turn(chat_repository, room_id, "질문3")
+
+    turns = await chat_repository.list_recent_turns(room_id, turns=3)
+
+    assert [[(p.policy_no, p.policy_name) for p in t.policies] for t in turns] == [
+        [(TEST_POLICY_NOS[0], "테스트 정책 01")],
+        [(TEST_POLICY_NOS[2], "테스트 정책 03"), (TEST_POLICY_NOS[1], "테스트 정책 02")],
+        [],
+    ]
+
+
+# message_id는 방과 관계없이 증가하므로 두 방을 번갈아 저장해도 짝이 섞이지 않는지 확인함
+async def test_recent_turns_ignore_other_rooms(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    other_id = await chat_repository.create_room(USER_ID, Profile())
+    await _save_turn(chat_repository, room_id, "질문1")
+    await _save_turn(chat_repository, other_id, "다른 방 질문")
+    await _save_turn(chat_repository, room_id, "질문2")
+
+    turns = await chat_repository.list_recent_turns(room_id, turns=3)
+
+    assert [(t.question, t.answer) for t in turns] == [
+        ("질문1", "질문1 답변"),
+        ("질문2", "질문2 답변"),
+    ]
+
+
+# 저장은 PR 2에서 추가하므로 행을 직접 넣고 display_order 순서로 읽는지 확인함
+async def test_list_current_policies_in_display_order(chat_repository, session_factory):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    assert await chat_repository.list_current_policies(room_id) == []
+
+    async with session_factory() as session, session.begin():
+        await session.execute(
+            text("""
+                INSERT INTO chat_current_policy (room_id, policy_no, display_order)
+                VALUES (:room_id, :policy_no, :display_order)
+            """),
+            [
+                {"room_id": room_id, "policy_no": TEST_POLICY_NOS[2], "display_order": 2},
+                {"room_id": room_id, "policy_no": TEST_POLICY_NOS[0], "display_order": 1},
+            ],
+        )
+
+    policies = await chat_repository.list_current_policies(room_id)
+
+    assert [(p.policy_no, p.policy_name) for p in policies] == [
+        (TEST_POLICY_NOS[0], "테스트 정책 01"),
+        (TEST_POLICY_NOS[2], "테스트 정책 03"),
+    ]
