@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app.repositories.chat_repository import ChatRepository
-from app.schemas.pipeline import PolicyItem, Profile
+from app.schemas.pipeline import PolicyItem, PolicyRef, Profile
 from tests.conftest import TEST_POLICY_NOS
 
 USER_ID = "test-user"
@@ -15,14 +15,21 @@ def _policy(policy_no: str, score: float) -> PolicyItem:
     return PolicyItem(policy_no=policy_no, policy_name="응답용 이름", score=score)
 
 
-async def _save_turn(repo: ChatRepository, room_id, question: str, policies=(), metadata=None) -> int:
+async def _save_turn(
+    repo: ChatRepository, room_id, question: str, policies=(), metadata=None, current_policies=()
+) -> int:
     return await repo.save_turn(
         room_id=room_id,
         question=question,
         answer=f"{question} 답변",
         answer_metadata=metadata or {},
         policies=list(policies),
+        current_policies=list(current_policies),
     )
+
+
+def _ref(policy_no: str) -> PolicyRef:
+    return PolicyRef(policy_no=policy_no, policy_name="응답용 이름")
 
 
 async def test_create_and_get_room(chat_repository):
@@ -151,7 +158,10 @@ async def test_save_turn_rolls_back_on_failure(chat_repository):
 # 회원 탈퇴 시 채팅방 삭제 한 번으로 하위 데이터가 모두 지워지는 전제를 확인함
 async def test_delete_room_cascades(chat_repository, session_factory):
     room_id = await chat_repository.create_room(USER_ID, Profile(age=30))
-    await _save_turn(chat_repository, room_id, "질문", policies=[_policy(TEST_POLICY_NOS[0], 0.5)])
+    await _save_turn(
+        chat_repository, room_id, "질문",
+        policies=[_policy(TEST_POLICY_NOS[0], 0.5)], current_policies=[_ref(TEST_POLICY_NOS[0])],
+    )
 
     async with session_factory() as session, session.begin():
         await session.execute(text("DELETE FROM chat_room WHERE room_id = :room_id"), {"room_id": room_id})
@@ -161,6 +171,7 @@ async def test_delete_room_cascades(chat_repository, session_factory):
             SELECT (SELECT count(*) FROM chat_profile)
                  + (SELECT count(*) FROM chat_message)
                  + (SELECT count(*) FROM message_policy_ref)
+                 + (SELECT count(*) FROM chat_current_policy)
         """))
         assert result.scalar_one() == 0
 
@@ -221,26 +232,43 @@ async def test_recent_turns_ignore_other_rooms(chat_repository):
     ]
 
 
-# 저장은 PR 2에서 추가하므로 행을 직접 넣고 display_order 순서로 읽는지 확인함
-async def test_list_current_policies_in_display_order(chat_repository, session_factory):
+async def test_save_turn_sets_current_policies_in_order(chat_repository):
     room_id = await chat_repository.create_room(USER_ID, Profile())
     assert await chat_repository.list_current_policies(room_id) == []
 
-    async with session_factory() as session, session.begin():
-        await session.execute(
-            text("""
-                INSERT INTO chat_current_policy (room_id, policy_no, display_order)
-                VALUES (:room_id, :policy_no, :display_order)
-            """),
-            [
-                {"room_id": room_id, "policy_no": TEST_POLICY_NOS[2], "display_order": 2},
-                {"room_id": room_id, "policy_no": TEST_POLICY_NOS[0], "display_order": 1},
-            ],
-        )
+    await _save_turn(chat_repository, room_id, "질문", current_policies=[
+        _ref(TEST_POLICY_NOS[2]), _ref(TEST_POLICY_NOS[0]),
+    ])
 
-    policies = await chat_repository.list_current_policies(room_id)
-
-    assert [(p.policy_no, p.policy_name) for p in policies] == [
-        (TEST_POLICY_NOS[0], "테스트 정책 01"),
+    # 이름은 저장 값이 아니라 policy 테이블의 현재 값으로 읽힘
+    assert [(p.policy_no, p.policy_name) for p in await chat_repository.list_current_policies(room_id)] == [
         (TEST_POLICY_NOS[2], "테스트 정책 03"),
+        (TEST_POLICY_NOS[0], "테스트 정책 01"),
     ]
+
+
+# 지금 상태만 두는 테이블이라 이전 턴의 정책이 남지 않고 교체·초기화되어야 함
+async def test_save_turn_replaces_and_clears_current_policies(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    other_id = await chat_repository.create_room(USER_ID, Profile())
+    await _save_turn(chat_repository, room_id, "질문1", current_policies=[_ref(TEST_POLICY_NOS[0])])
+    await _save_turn(chat_repository, other_id, "다른 방", current_policies=[_ref(TEST_POLICY_NOS[0])])
+
+    await _save_turn(chat_repository, room_id, "질문2", current_policies=[_ref(TEST_POLICY_NOS[1])])
+    assert [p.policy_no for p in await chat_repository.list_current_policies(room_id)] == [TEST_POLICY_NOS[1]]
+
+    await _save_turn(chat_repository, room_id, "질문3")
+    assert await chat_repository.list_current_policies(room_id) == []
+    # 다른 채팅방의 현재 정책은 건드리지 않음
+    assert [p.policy_no for p in await chat_repository.list_current_policies(other_id)] == [TEST_POLICY_NOS[0]]
+
+
+# 턴 저장이 실패하면 현재 정책 교체도 함께 취소되어야 함
+async def test_current_policies_roll_back_with_turn(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    await _save_turn(chat_repository, room_id, "질문1", current_policies=[_ref(TEST_POLICY_NOS[0])])
+
+    with pytest.raises(IntegrityError):
+        await _save_turn(chat_repository, room_id, "질문2", current_policies=[_ref("NOT-EXISTS")])
+
+    assert [p.policy_no for p in await chat_repository.list_current_policies(room_id)] == [TEST_POLICY_NOS[0]]

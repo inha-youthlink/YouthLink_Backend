@@ -58,6 +58,7 @@ class ChatService:
             answer=output.answer,
             answer_metadata=_answer_metadata(output),
             policies=output.policies,
+            current_policies=output.current_policies,
         )
         return SendMessageResponse(message_id=message_id, answer=output.answer, policies=output.policies)
 
