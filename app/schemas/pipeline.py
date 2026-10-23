@@ -60,6 +60,8 @@ class PipelineOutput(BaseModel):
     answer: str
     policies: list[PolicyItem]
     trace: dict[str, Any]
+    # 이번 턴이 끝난 뒤의 전체 상태라 바뀌지 않았으면 입력 값이 그대로 들어감
+    current_policies: list[PolicyRef] = Field(default_factory=list)
 
 
 # 근거 원문, 청크 정보 같은 내부 정보가 서비스 응답에 나가지 않도록 허용한 키만 남김
@@ -75,4 +77,5 @@ PUBLIC_TRACE_KEYS = frozenset({
     "embedding_model",
     "handler",
     "analysis",
+    "current_policy_nos",
 })

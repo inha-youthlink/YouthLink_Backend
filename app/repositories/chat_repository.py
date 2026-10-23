@@ -93,6 +93,16 @@ INSERT INTO message_policy_ref (message_id, policy_no, relevance_score, display_
 VALUES (:message_id, :policy_no, :relevance_score, :display_order)
 """)
 
+_DELETE_CURRENT_POLICIES_SQL = text("""
+DELETE FROM chat_current_policy
+WHERE room_id = :room_id
+""")
+
+_INSERT_CURRENT_POLICY_SQL = text("""
+INSERT INTO chat_current_policy (room_id, policy_no, display_order)
+VALUES (:room_id, :policy_no, :display_order)
+""")
+
 _TOUCH_ROOM_SQL = text("""
 UPDATE chat_room
 SET updated_at = NOW()
@@ -191,6 +201,7 @@ class ChatRepository:
         answer: str,
         answer_metadata: dict[str, Any],
         policies: list[PolicyItem],
+        current_policies: list[PolicyRef],
     ) -> int:
         async with self._session_factory() as session, session.begin():
             await session.execute(
@@ -213,6 +224,14 @@ class ChatRepository:
                         "display_order": order,
                     }
                     for order, policy in enumerate(policies, start=1)
+                ])
+
+            # 현재 정책은 지금 상태만 두는 테이블이라 매 턴 지우고 다시 넣음 (이력은 답변 metadata)
+            await session.execute(_DELETE_CURRENT_POLICIES_SQL, {"room_id": room_id})
+            if current_policies:
+                await session.execute(_INSERT_CURRENT_POLICY_SQL, [
+                    {"room_id": room_id, "policy_no": policy.policy_no, "display_order": order}
+                    for order, policy in enumerate(current_policies, start=1)
                 ])
             await session.execute(_TOUCH_ROOM_SQL, {"room_id": room_id})
         return answer_id

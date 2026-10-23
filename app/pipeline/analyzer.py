@@ -9,11 +9,11 @@ from pydantic import ValidationError
 from app.pipeline.context import PipelineContext
 from app.pipeline.generator import PROMPTS_DIR
 from app.schemas.analysis import Intent, QueryAnalysis, StatusFilter, SubQuery
-from app.schemas.pipeline import ConversationTurn, PipelineInput
+from app.schemas.pipeline import ConversationTurn, PipelineInput, PolicyRef
 
 logger = logging.getLogger(__name__)
 
-PROMPT_NAME = "analyze_v1"
+PROMPT_NAME = "analyze_v2"
 # 프롬프트 규칙("최대 3개")과 함께 바뀌어야 해서 설정값이 아닌 상수로 둠
 MAX_SUB_QUERIES = 3
 NONE_TEXT = "없음"
@@ -29,9 +29,14 @@ class ResolvedSubQuery:
     standalone_question: str
     # 검증 전 LLM 출력을 남겨 target_policy_nos와 다르면 지목 오류로 볼 수 있음
     target_refs: list[str]
-    target_policy_nos: list[str]
+    # 후보 규칙을 이 파일에만 두려고 이름까지 담아 넘김 (현재 정책 갱신이 다시 찾지 않음)
+    targets: list[PolicyRef]
     intent: Intent
     status_filter: StatusFilter
+
+    @property
+    def target_policy_nos(self) -> list[str]:
+        return [policy.policy_no for policy in self.targets]
 
 
 @dataclass(frozen=True)
@@ -124,23 +129,23 @@ def _failed(
     )
 
 
-def _resolve(sub: SubQuery, labels: dict[str, str]) -> ResolvedSubQuery:
+def _resolve(sub: SubQuery, labels: dict[str, PolicyRef]) -> ResolvedSubQuery:
     refs = (ref.strip().upper() for ref in sub.target_refs)
-    policy_nos = [labels[ref] for ref in refs if ref in labels]
+    targets = {labels[ref].policy_no: labels[ref] for ref in refs if ref in labels}
     return ResolvedSubQuery(
         standalone_question=sub.standalone_question,
         target_refs=sub.target_refs,
-        target_policy_nos=list(dict.fromkeys(policy_nos)),
+        targets=list(targets.values()),
         intent=sub.intent,
         status_filter=sub.status_filter,
     )
 
 
 # 숫자는 화면 카드 번호와 같아야 해서 직전 답변에만 붙이고, 화면 밖 현재 정책은 C 표기로 구분함
-def _build_input(inp: PipelineInput, answer_max_chars: int) -> tuple[dict[str, str], str]:
+def _build_input(inp: PipelineInput, answer_max_chars: int) -> tuple[dict[str, PolicyRef], str]:
     shown = inp.history[-1].policies if inp.history else []
-    labels = {str(order): policy.policy_no for order, policy in enumerate(shown, start=1)}
-    shown_label = {policy_no: label for label, policy_no in labels.items()}
+    labels = {str(order): policy for order, policy in enumerate(shown, start=1)}
+    shown_label = {policy.policy_no: label for label, policy in labels.items()}
     shown_lines = [f"{order}. {policy.policy_name}" for order, policy in enumerate(shown, start=1)]
 
     current_lines = []
@@ -151,7 +156,7 @@ def _build_input(inp: PipelineInput, answer_max_chars: int) -> tuple[dict[str, s
             continue
         off_screen += 1
         label = f"C{off_screen}"
-        labels[label] = policy.policy_no
+        labels[label] = policy
         current_lines.append(f"{label}. {policy.policy_name}")
 
     history_lines = [
