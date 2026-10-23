@@ -7,9 +7,10 @@ from app.core.dependencies import PipelineDeps
 from app.llm.client import ChatResult
 from app.pipeline import generator
 from app.pipeline.context import PipelineContext
-from app.pipeline.generator import CLOSED_CODE, parse_card_line
+from app.pipeline.generator import parse_card_line
 from app.pipeline.grouping import PolicyGroup
 from app.repositories.policy_repository import PolicyRecord
+from app.schemas.policy_info import CLOSED_CODE
 from app.schemas.pipeline import PipelineInput
 
 
@@ -65,14 +66,17 @@ class FakeCommonCodes:
         return {}
 
 
-def _record(policy_no: str, name: str, code: str | None = None) -> PolicyRecord:
+def _record(policy_no: str, name: str, code: str | None = None, **links) -> PolicyRecord:
     return PolicyRecord(
         policy_no=policy_no,
         policy_name=name,
         application_period_type_code=code,
         application_start_date=None,
         application_end_date=None,
-        application_url=None,
+        application_url=links.get("application_url"),
+        reference_url_1=links.get("reference_url_1"),
+        reference_url_2=links.get("reference_url_2"),
+        supervising_org_name=links.get("org"),
     )
 
 
@@ -86,7 +90,14 @@ def _ctx(llm: FakeLLM) -> PipelineContext:
     )
     ctx.candidates = [PolicyGroup("P-RENT", 0.9, []), PolicyGroup("P-LOAN", 0.8, [])]
     ctx.policies = {
-        "P-RENT": _record("P-RENT", "청년 월세 지원"),
+        "P-RENT": _record(
+            "P-RENT",
+            "청년 월세 지원",
+            application_url="www.example.go.kr",
+            reference_url_1="https://www.example.go.kr",
+            reference_url_2="https://www.example.go.kr/rent",
+            org="서울특별시 주택정책과",
+        ),
         "P-LOAN": _record("P-LOAN", "청년 전세 이자 지원", CLOSED_CODE),
     }
     ctx.documents = {"P-RENT": ["정책명: 청년 월세 지원\n적용 지역: 서울특별시", "지원 내용: 월 20만 원"]}
@@ -102,8 +113,16 @@ async def test_generate_uses_whole_documents_of_candidates():
     # 후보 순서가 근거 번호이고, 청크가 없는 정책도 번호가 밀리지 않도록 블록을 만듦
     assert "<정책 1> 청년 월세 지원" in user_message
     assert "적용 지역: 서울특별시\n지원 내용: 월 20만 원" in user_message
-    assert "<정책 2> 청년 전세 이자 지원\n[신청 상태] 마감\n[신청 링크] 정보 없음\n[정책 정보]\n정보 없음" in user_message
+    # scheme이 빠진 신청 링크는 https를 붙이고, 신청 링크와 같은 참고 링크는 건너뜀
+    assert (
+        "<정책 1> 청년 월세 지원\n[신청 상태] 정보 없음\n[신청 링크] https://www.example.go.kr\n"
+        "[참고 링크] https://www.example.go.kr/rent\n[담당 기관] 서울특별시 주택정책과\n[정책 정보]"
+    ) in user_message
+    assert (
+        "<정책 2> 청년 전세 이자 지원\n[신청 상태] 마감\n[신청 링크] 정보 없음\n[참고 링크] 정보 없음\n"
+        "[담당 기관] 정보 없음\n[정책 정보]\n정보 없음"
+    ) in user_message
     assert result.card_numbers == [2]
     assert result.answer == "전세 이자 지원은 마감되었어요."
-    assert result.prompt_version == "generate_v2"
+    assert result.prompt_version == "generate_v3"
     assert len(result.contexts) == 2

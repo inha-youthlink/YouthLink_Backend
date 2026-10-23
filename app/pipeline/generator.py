@@ -1,17 +1,16 @@
 import re
 from dataclasses import dataclass
 from datetime import date
-from enum import StrEnum
 from pathlib import Path
 
+from app.pipeline.cards import status_of
 from app.pipeline.context import PipelineContext
 from app.pipeline.grouping import PolicyGroup
 from app.repositories.policy_repository import PolicyRecord
+from app.schemas.policy_info import ApplicationStatus, clean_url
 
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
-ALWAYS_OPEN_CODE = "0057002"
-CLOSED_CODE = "0057003"
 NO_RESTRICTION_NAME = "제한없음"
 MISSING = "정보 없음"
 NO_EVIDENCE = "검색된 정책 없음"
@@ -29,12 +28,14 @@ PROFILE_CODE_LABELS = {
 }
 
 
-class ApplicationStatus(StrEnum):
-    ALWAYS_OPEN = "상시 모집"
-    OPEN = "신청 가능"
-    UPCOMING = "신청 예정"
-    CLOSED = "마감"
-    UNKNOWN = "정보 없음"
+# 근거는 LLM이 읽는 문장이라 응답 코드 대신 한국어로 씀
+STATUS_LABELS = {
+    ApplicationStatus.OPEN: "신청 가능",
+    ApplicationStatus.ALWAYS_OPEN: "상시 모집",
+    ApplicationStatus.UPCOMING: "신청 예정",
+    ApplicationStatus.CLOSED: "마감",
+    ApplicationStatus.UNKNOWN: "정보 없음",
+}
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,7 @@ class CardLine:
     body: str
 
 
-async def generate(ctx: PipelineContext, prompt_name: str = "generate_v2") -> GenerationResult:
+async def generate(ctx: PipelineContext, prompt_name: str = "generate_v3") -> GenerationResult:
     system_prompt = (PROMPTS_DIR / f"{prompt_name}.md").read_text(encoding="utf-8")
     profile_text = await _format_profile(ctx)
     contexts = _format_evidence(ctx.candidates, ctx.policies, ctx.documents, ctx.today)
@@ -92,24 +93,6 @@ def parse_card_line(text: str, candidate_count: int) -> CardLine:
     return CardLine(numbers=numbers, body=rest.strip())
 
 
-# 상시·마감 정책은 신청 날짜가 없어 코드로 판단함
-# 특정기간 코드는 기간이 끝나도 마감으로 갱신되지 않아 날짜로 판단함
-def application_status(policy: PolicyRecord, today: date) -> ApplicationStatus:
-    if policy.application_period_type_code == ALWAYS_OPEN_CODE:
-        return ApplicationStatus.ALWAYS_OPEN
-    if policy.application_period_type_code == CLOSED_CODE:
-        return ApplicationStatus.CLOSED
-
-    start, end = policy.application_start_date, policy.application_end_date
-    if start is None and end is None:
-        return ApplicationStatus.UNKNOWN
-    if end is not None and end < today:
-        return ApplicationStatus.CLOSED
-    if start is not None and start > today:
-        return ApplicationStatus.UPCOMING
-    return ApplicationStatus.OPEN
-
-
 async def _format_profile(ctx: PipelineContext) -> str:
     profile = ctx.input.profile
     codes = [getattr(profile, field) for field in PROFILE_CODE_LABELS if getattr(profile, field)]
@@ -140,26 +123,39 @@ def _format_evidence(
     blocks = []
     for number, group in enumerate(candidates, start=1):
         policy = policies[group.policy_no]
+        application_url = clean_url(policy.application_url)
         # 정책 번호는 답변에 노출되지 않도록 근거에 넣지 않음
         blocks.append("\n".join([
             f"<정책 {number}> {policy.policy_name}",
             f"[신청 상태] {_format_status(policy, today)}",
-            f"[신청 링크] {policy.application_url or MISSING}",
+            f"[신청 링크] {application_url or MISSING}",
+            f"[참고 링크] {_reference_url(policy, application_url) or MISSING}",
+            f"[담당 기관] {policy.supervising_org_name or MISSING}",
             "[정책 정보]",
             *(documents.get(group.policy_no) or [MISSING]),
         ]))
     return blocks
 
 
+def _reference_url(policy: PolicyRecord, application_url: str | None) -> str | None:
+    # 신청 링크와 같은 주소가 많아(278건) 같은 링크를 두 번 안내하지 않도록 뺌
+    for value in (policy.reference_url_1, policy.reference_url_2):
+        url = clean_url(value)
+        if url and url != application_url:
+            return url
+    return None
+
+
 def _format_status(policy: PolicyRecord, today: date) -> str:
-    status = application_status(policy, today)
+    status = status_of(policy, today)
+    label = STATUS_LABELS[status]
     start, end = policy.application_start_date, policy.application_end_date
     # 마감 코드 정책은 날짜가 없어 "미정 ~ 미정"이 붙지 않도록 상태만 표시함
     if status == ApplicationStatus.ALWAYS_OPEN or (start is None and end is None):
-        return status.value
+        return label
     start = start.isoformat() if start else "미정"
     end = end.isoformat() if end else "미정"
-    return f"{status.value} (신청 기간: {start} ~ {end})"
+    return f"{label} (신청 기간: {start} ~ {end})"
 
 
 def _format_won(amount: int) -> str:

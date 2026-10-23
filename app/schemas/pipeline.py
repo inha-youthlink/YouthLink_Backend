@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.policy_info import ApplicationStatus
+
 
 class Profile(BaseModel):
     age: int | None = Field(default=None, ge=0)
@@ -54,6 +56,9 @@ class PolicyItem(BaseModel):
     application_end_date: date | None = None
     application_url: str | None = None
     score: float
+    # 날짜만으로는 상시·마감 코드·정보 없음을 구분할 수 없어 서버가 계산한 상태를 함께 줌
+    application_status: ApplicationStatus | None = None
+    supervising_org_name: str | None = None
 
 
 class PipelineOutput(BaseModel):

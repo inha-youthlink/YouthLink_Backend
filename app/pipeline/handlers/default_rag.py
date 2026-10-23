@@ -33,7 +33,7 @@ async def handle(ctx: PipelineContext) -> PipelineOutput:
 
     if result.card_numbers is None:
         logger.warning("답변 첫 줄 카드 형식이 없어 후보 전체를 카드로 표시함")
-    policies = build_cards(ctx.candidates, ctx.policies, result.card_numbers)
+    policies = build_cards(ctx.candidates, ctx.policies, result.card_numbers, ctx.today)
 
     ctx.trace.update({
         "retrieved_chunks": [
