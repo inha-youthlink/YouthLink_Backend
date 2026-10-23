@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from app.core.dependencies import PipelineDeps
 from app.pipeline.grouping import PolicyGroup
 from app.repositories.policy_repository import PolicyRecord
-from app.schemas.pipeline import PipelineInput
+from app.schemas.pipeline import PipelineInput, PolicyRef
 
 # analyzer가 PipelineContext를 가져다 써서 실행 시점에 가져오면 순환 import가 됨
 if TYPE_CHECKING:
@@ -27,6 +27,7 @@ class PipelineContext:
     query: str
     today: date = field(default_factory=today_kst)
     analysis: "AnalysisResult | None" = None
+    current_policies: list[PolicyRef] = field(default_factory=list)
     groups: list[PolicyGroup] = field(default_factory=list)
     policies: dict[str, PolicyRecord] = field(default_factory=dict)
     trace: dict[str, Any] = field(default_factory=dict)
