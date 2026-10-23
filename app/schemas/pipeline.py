@@ -28,7 +28,7 @@ class ConversationTurn(BaseModel):
     question: str
     # 자르는 길이는 단계마다 달라 전문을 받고 쓰는 쪽에서 자름
     answer: str
-    # 목록 순서가 카드 순서이며, 턴마다 두어 후보 범위를 넓혀도 입력 형태가 그대로임
+    # 목록 순서가 카드 순서
     policies: list[PolicyRef] = Field(default_factory=list)
 
 

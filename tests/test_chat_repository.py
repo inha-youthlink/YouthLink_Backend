@@ -173,7 +173,6 @@ async def test_list_rooms_by_user(chat_repository):
 
     # 늦게 만든 방보다 최근에 대화한 방이 위에 옴
     assert [room.room_id for room in rooms] == [older, newer]
-    # 대화가 없는 채팅방은 제목이 없음
     assert (rooms[0].title, rooms[1].title) == ("질문 제목", None)
 
 
@@ -304,7 +303,6 @@ async def test_save_turn_replaces_and_clears_current_policies(chat_repository):
 
     await _save_turn(chat_repository, room_id, "질문3")
     assert await chat_repository.list_current_policies(room_id) == []
-    # 다른 채팅방의 현재 정책은 건드리지 않음
     assert [p.policy_no for p in await chat_repository.list_current_policies(other_id)] == [TEST_POLICY_NOS[0]]
 
 

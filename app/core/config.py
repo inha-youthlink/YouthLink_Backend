@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # Retrieval
     retriever: str = "vector"
-    # 정책마다 청크가 4개라 10이면 정책이 6~8개뿐이어서 상태 정렬 전 후보를 넉넉히 모음
+    # 청크 단위라 10이면 정책이 6~8개뿐이어서 넉넉히 가져옴
     top_k: int = Field(default=30, ge=1)
     card_candidates: int = Field(default=5, ge=1)
 

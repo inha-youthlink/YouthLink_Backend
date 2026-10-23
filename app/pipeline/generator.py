@@ -28,7 +28,6 @@ PROFILE_CODE_LABELS = {
 }
 
 
-# 근거는 LLM이 읽는 문장이라 응답 코드 대신 한국어로 씀
 STATUS_LABELS = {
     ApplicationStatus.OPEN: "신청 가능",
     ApplicationStatus.ALWAYS_OPEN: "상시 모집",
@@ -138,7 +137,7 @@ def _format_evidence(
 
 
 def _reference_url(policy: PolicyRecord, application_url: str | None) -> str | None:
-    # 신청 링크와 같은 주소가 많아(278건) 같은 링크를 두 번 안내하지 않도록 뺌
+    # 신청 링크와 같은 주소면 두 번 안내하지 않도록 뺌
     for value in (policy.reference_url_1, policy.reference_url_2):
         url = clean_url(value)
         if url and url != application_url:

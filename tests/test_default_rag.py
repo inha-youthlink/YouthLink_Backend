@@ -33,7 +33,7 @@ def _record(policy_no: str, code: str | None = None) -> PolicyRecord:
 
 class FakeRetriever:
     async def retrieve(self, query, policy_ids, k):
-        # 마감 정책이 점수 2위 (1위는 상태와 관계없이 후보에 남으므로 2위로 둠)
+        # 확실한 1위는 상태와 관계없이 남으므로 마감 정책을 2위로 둠
         return [_chunk("P-A", 0.9), _chunk("P-CLOSED", 0.8), _chunk("P-B", 0.7), _chunk("P-C", 0.6)]
 
 

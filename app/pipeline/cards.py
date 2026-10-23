@@ -14,8 +14,7 @@ STATUS_RANK = {
     ApplicationStatus.CLOSED: 3,
 }
 
-# 1위가 2위보다 이만큼 높으면 질문이 그 정책을 가리킨다고 봄. 실제 데이터 예: 이름을 직접 물은 질문 0.788 대 0.633,
-# 일반 목록 질문 0.500 대 0.495. 기준값은 신청 상태 우선순위 PR에서 실제 질문들로 다시 정함
+# 1위가 이름이 다른 다음 정책보다 이만큼 높으면 질문이 그 정책을 가리킨다고 봄 (임시 기준값)
 CLEAR_TOP_MARGIN = 0.05
 # 같은 이름이 지역별로 많은 정책("청년 월세 지원")에서 후보를 다 차지하지 않도록 제한함
 MAX_CLEAR_TOP = 2
@@ -29,16 +28,13 @@ def pick_candidates(
     def rank(group: PolicyGroup) -> int:
         return STATUS_RANK[status_of(policies[group.policy_no], today)]
 
-    # 정책 이름을 직접 물으면 그 정책이 확실한 1위인데, 마감·예정이면 상태 정렬로 밀려 "찾지 못했다"가 됨
-    # 확실한 1위를 먼저 자리에 넣고 나머지를 상태 순으로 채운 뒤, 전체를 다시 상태 순으로 둠
-    # 정렬이 안정적이라 같은 상태끼리는 검색 점수 순서가 유지됨
+    # 이름을 직접 물은 정책이 마감·예정이어도 밀리지 않도록 확실한 1위를 먼저 넣음
     top = _clear_top(known, policies)
     rest = [group for group in sorted(known, key=rank) if group not in top]
     return sorted([*top, *rest][:limit], key=rank)
 
 
 # 같은 이름은 같은 사업의 연도·지역별 공고라 한 묶음으로 보고, 이름이 다른 정책과 점수 차이를 비교함
-# (예: 경기도 청년기본소득 2025 마감 0.689, 2026 예정 0.666, 다음 정책 0.630)
 def _clear_top(groups: list[PolicyGroup], policies: dict[str, PolicyRecord]) -> list[PolicyGroup]:
     if not groups:
         return []

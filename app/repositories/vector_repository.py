@@ -32,7 +32,7 @@ class VectorRepository:
         k: int,
         policy_ids: list[str] | None = None,
     ) -> list[Chunk]:
-        # 필터 결과가 0건이면 조회 없이 빈 결과를 반환함
+        # None은 필터 없음, 빈 목록은 조건에 맞는 정책이 없다는 뜻이라 조회하지 않음
         if policy_ids is not None and not policy_ids:
             return []
 

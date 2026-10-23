@@ -12,7 +12,6 @@ KST = ZoneInfo("Asia/Seoul")
 DOMAIN_LIKE = re.compile(r"[\w-]+(\.[\w-]+)+(/\S*)?", re.ASCII)
 
 
-# 응답 필드 값이라 화면 문구와 분리해 코드로 둠. 프론트가 문구를 정함
 class ApplicationStatus(StrEnum):
     OPEN = "OPEN"
     ALWAYS_OPEN = "ALWAYS_OPEN"
@@ -26,10 +25,8 @@ def today_kst() -> date:
     return datetime.now(KST).date()
 
 
-# 카드 생성(pipeline)과 기록 복원(저장소)이 같은 판단을 쓰도록 입출력 없는 함수로 둠
-# 상시·마감 정책은 신청 날짜가 없어 코드로 판단함
-# 특정기간 코드는 기간이 끝나도 마감으로 갱신되지 않아 날짜로 판단함
-# 마감 코드는 기간이 남아 있어도 조기 종료로 보고 마감으로 판단함
+# 특정기간 코드는 기간이 지나도 마감으로 바뀌지 않아 날짜로 판단함
+# 마감 코드는 기간이 남아 있어도 조기 종료로 봄
 def application_status(
     period_type_code: str | None, start: date | None, end: date | None, today: date
 ) -> ApplicationStatus:
@@ -47,7 +44,6 @@ def application_status(
     return ApplicationStatus.OPEN
 
 
-# 카드와 근거가 같은 링크를 쓰도록 여기서 정리함
 def clean_url(value: str | None) -> str | None:
     value = (value or "").strip()
     if re.match(r"https?://", value, re.IGNORECASE):

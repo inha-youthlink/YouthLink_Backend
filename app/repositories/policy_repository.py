@@ -46,7 +46,7 @@ class PolicyRepository:
             result = await session.execute(_GET_BY_IDS_SQL, {"policy_nos": policy_nos})
             return {row["policy_no"]: PolicyRecord(**row) for row in result.mappings()}
 
-    # ETL 청크가 정책 원본 필드를 지역명·코드명까지 풀어 쓴 것이라, 정책 전체 근거로 검색 여부와 관계없이 모든 청크를 씀
+    # 청크가 정책 원본 전체를 풀어 쓴 것이라, 검색된 청크만이 아니라 정책 전체를 근거로 씀
     async def get_documents(self, policy_nos: list[str]) -> dict[str, list[str]]:
         if not policy_nos:
             return {}

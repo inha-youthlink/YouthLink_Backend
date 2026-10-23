@@ -18,7 +18,6 @@ from app.repositories.vector_repository import VectorRepository
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
 
-    # 서버 시작: OpenAI, DB 클라이언트 생성
     app.state.llm = LLMClient.from_settings(settings)
     app.state.engine = create_async_engine(
         settings.database_url.get_secret_value(),
@@ -26,7 +25,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.session_factory = async_sessionmaker(app.state.engine, expire_on_commit=False)
 
-    # 저장소와 검색기 생성: 잘못된 RETRIEVER 값이 첫 요청이 아니라 서버 시작 시 실패하도록 여기서 생성함
+    # 잘못된 RETRIEVER 값이 첫 요청이 아니라 서버 시작 시 실패하도록 여기서 생성함
     app.state.policy_repository = PolicyRepository(app.state.session_factory)
     app.state.common_code_repository = CommonCodeRepository(app.state.session_factory)
     app.state.chat_repository = ChatRepository(app.state.session_factory)
@@ -38,7 +37,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
-    # 서버 종료: 클라이언트 정리
     await app.state.llm.close()
     await app.state.engine.dispose()
 

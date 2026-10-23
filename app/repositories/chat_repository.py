@@ -156,7 +156,7 @@ class ChatRepository:
         if not message_ids:
             return {}
 
-        # 지난 대화의 카드도 지금 신청할 수 있는지가 중요해 저장 당시가 아니라 조회 시점 기준으로 상태를 계산함
+        # 지난 카드도 지금 신청 가능한지를 보여 주려고 조회 시점 기준으로 계산함
         today = today_kst()
         refs: dict[int, list[PolicyItem]] = {}
         async with self._session_factory() as session:

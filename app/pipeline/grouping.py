@@ -20,7 +20,6 @@ def group_by_policy(chunks: list[Chunk]) -> list[PolicyGroup]:
             policy_no=policy_no,
             # 평균을 쓰면 여러 청크로 나뉜 정책이 불리해져 최고 점수를 대표값으로 사용함
             score=max(c.score for c in policy_chunks),
-            # 답변 근거로 넣을 때 원문 순서를 유지함
             chunks=sorted(policy_chunks, key=lambda c: c.chunk_index),
         )
         for policy_no, policy_chunks in by_policy.items()
