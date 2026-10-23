@@ -30,4 +30,7 @@ class PipelineContext:
     current_policies: list[PolicyRef] = field(default_factory=list)
     groups: list[PolicyGroup] = field(default_factory=list)
     policies: dict[str, PolicyRecord] = field(default_factory=dict)
+    # 답변 생성에 넘기는 정책. 이 순서가 근거 번호이자 카드 순서임
+    candidates: list[PolicyGroup] = field(default_factory=list)
+    documents: dict[str, list[str]] = field(default_factory=dict)
     trace: dict[str, Any] = field(default_factory=dict)
