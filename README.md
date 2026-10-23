@@ -1,4 +1,4 @@
-# YouthLink RAG
+# YouthLink Backend
 
 YouthLink RAG 기반 청년 지원 챗봇 및 신청 가이드 시스템의 백엔드입니다.
 

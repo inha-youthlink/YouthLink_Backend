@@ -1,4 +1,4 @@
-# YouthLink RAG 서버 설계 정리
+# YouthLink 백엔드 설계 정리
 
 > RAG Technique 담당 기준. 백엔드는 이 저장소의 FastAPI 서버 하나로, 공개 API(프론트), 채팅 저장, RAG 파이프라인을 맡는다 (8주차에 Spring 제외, 15절).
 > 최종 수정: 2026-10-23 (8주차)
@@ -104,7 +104,7 @@
 
 ### 3-1. 디렉터리 구조 (`[+]`는 이후 추가 예정)
 ```
-YouthLink_RAG/
+YouthLink_Backend/
 ├─ app/
 │  ├─ main.py                    # 앱 생성, 라우터 등록, lifespan
 │  ├─ core/
