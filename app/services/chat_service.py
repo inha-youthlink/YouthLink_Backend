@@ -16,6 +16,8 @@ from app.schemas.pipeline import PUBLIC_TRACE_KEYS, PipelineInput, PipelineOutpu
 
 # 청크 ID는 ETL이 청크를 다시 만들면 바뀔 수 있어 정책 번호·종류·인덱스로 청크를 남김
 CHUNK_METADATA_KEYS = ("policy_no", "chunk_type", "chunk_index", "score")
+# 채팅방 목록 한 줄에 들어갈 길이 (chat_room.title은 VARCHAR(200))
+ROOM_TITLE_MAX_CHARS = 30
 
 
 class RoomNotFoundError(Exception):
@@ -59,6 +61,7 @@ class ChatService:
             answer_metadata=_answer_metadata(output),
             policies=output.policies,
             current_policies=output.current_policies,
+            room_title=_room_title(request.question),
         )
         return SendMessageResponse(message_id=message_id, answer=output.answer, policies=output.policies)
 
@@ -88,3 +91,8 @@ def _answer_metadata(output: PipelineOutput) -> dict[str, Any]:
         for chunk in output.trace.get("retrieved_chunks", [])
     ]
     return metadata
+
+
+def _room_title(question: str) -> str:
+    title = " ".join(question.split())
+    return title if len(title) <= ROOM_TITLE_MAX_CHARS else title[:ROOM_TITLE_MAX_CHARS].rstrip() + "…"

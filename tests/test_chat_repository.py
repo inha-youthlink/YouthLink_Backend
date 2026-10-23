@@ -25,6 +25,7 @@ async def _save_turn(
         answer_metadata=metadata or {},
         policies=list(policies),
         current_policies=list(current_policies),
+        room_title=f"{question} 제목",
     )
 
 
@@ -140,7 +141,19 @@ async def test_list_rooms_by_user(chat_repository):
 
     # 늦게 만든 방보다 최근에 대화한 방이 위에 옴
     assert [room.room_id for room in rooms] == [older, newer]
-    assert rooms[0].title is None
+    # 대화가 없는 채팅방은 제목이 없음
+    assert (rooms[0].title, rooms[1].title) == ("질문 제목", None)
+
+
+# 이후 턴에서 제목이 바뀌면 목록에서 같은 채팅방을 찾기 어려워 첫 턴 제목을 유지해야 함
+async def test_room_title_set_on_first_turn_only(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    await _save_turn(chat_repository, room_id, "질문1")
+    await _save_turn(chat_repository, room_id, "질문2")
+
+    rooms = await chat_repository.list_rooms(USER_ID)
+
+    assert [room.title for room in rooms] == ["질문1 제목"]
 
 
 # 정책 저장이 실패하면 이미 넣은 질문·답변까지 취소되어야 함 (한 턴 한 트랜잭션)

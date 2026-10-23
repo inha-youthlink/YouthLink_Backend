@@ -103,9 +103,11 @@ INSERT INTO chat_current_policy (room_id, policy_no, display_order)
 VALUES (:room_id, :policy_no, :display_order)
 """)
 
+# 제목은 첫 턴에만 정하고, 이후에는 바뀌지 않아 목록에서 같은 채팅방을 찾기 쉬움
 _TOUCH_ROOM_SQL = text("""
 UPDATE chat_room
-SET updated_at = NOW()
+SET updated_at = NOW(),
+    title = COALESCE(title, :title)
 WHERE room_id = :room_id
 """)
 
@@ -202,6 +204,7 @@ class ChatRepository:
         answer_metadata: dict[str, Any],
         policies: list[PolicyItem],
         current_policies: list[PolicyRef],
+        room_title: str,
     ) -> int:
         async with self._session_factory() as session, session.begin():
             await session.execute(
@@ -233,5 +236,5 @@ class ChatRepository:
                     {"room_id": room_id, "policy_no": policy.policy_no, "display_order": order}
                     for order, policy in enumerate(current_policies, start=1)
                 ])
-            await session.execute(_TOUCH_ROOM_SQL, {"room_id": room_id})
+            await session.execute(_TOUCH_ROOM_SQL, {"room_id": room_id, "title": room_title})
         return answer_id
