@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
@@ -14,6 +15,10 @@ CLOSED_CODE = "0057003"
 NO_RESTRICTION_NAME = "제한없음"
 MISSING = "정보 없음"
 NO_EVIDENCE = "검색된 정책 없음"
+
+# 첫 줄은 카드로 보여 줄 근거 번호. 스트리밍 때도 첫 줄만 모아 카드를 먼저 보낼 수 있는 형식
+# "[소개: 없음]", "[소개: 1번, 3번]"처럼 형식을 조금 벗어나도 숫자만 읽어 후보 전체 표시로 넘어가지 않게 함
+CARD_LINE = re.compile(r"\[소개\s*:([^\]]*)\]")
 
 PROFILE_CODE_LABELS = {
     "marriage_status_code": "혼인 상태",
@@ -38,14 +43,22 @@ class GenerationResult:
     prompt_version: str
     # 평가 서버가 근거 템플릿을 복제하지 않도록 LLM에 넘긴 정책별 근거 블록을 그대로 전달함
     contexts: list[str]
+    # 카드로 보여 줄 근거 번호 (1부터, 오름차순). None이면 첫 줄 형식을 어긴 경우
+    card_numbers: list[int] | None
     prompt_tokens: int
     completion_tokens: int
 
 
-async def generate(ctx: PipelineContext, prompt_name: str = "generate_v1") -> GenerationResult:
+@dataclass(frozen=True)
+class CardLine:
+    numbers: list[int] | None
+    body: str
+
+
+async def generate(ctx: PipelineContext, prompt_name: str = "generate_v2") -> GenerationResult:
     system_prompt = (PROMPTS_DIR / f"{prompt_name}.md").read_text(encoding="utf-8")
     profile_text = await _format_profile(ctx)
-    contexts = _format_evidence(ctx.groups, ctx.policies, ctx.today)
+    contexts = _format_evidence(ctx.candidates, ctx.policies, ctx.documents, ctx.today)
     evidence = "\n\n".join(contexts) if contexts else NO_EVIDENCE
     user_message = "\n\n".join([
         f"[오늘 날짜]\n{ctx.today.isoformat()}",
@@ -58,13 +71,25 @@ async def generate(ctx: PipelineContext, prompt_name: str = "generate_v1") -> Ge
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
     ])
+    card_line = parse_card_line(result.text, len(contexts))
     return GenerationResult(
-        answer=result.text,
+        answer=card_line.body,
         prompt_version=prompt_name,
         contexts=contexts,
+        card_numbers=card_line.numbers,
         prompt_tokens=result.prompt_tokens,
         completion_tokens=result.completion_tokens,
     )
+
+
+def parse_card_line(text: str, candidate_count: int) -> CardLine:
+    first, _, rest = text.strip().partition("\n")
+    match = CARD_LINE.fullmatch(first.strip())
+    if match is None:
+        return CardLine(numbers=None, body=text.strip())
+    # LLM은 빼기만 하고 순서는 코드가 정한 후보 순서를 따르도록 정렬함. 없는 번호는 버림
+    numbers = sorted({int(n) for n in re.findall(r"\d+", match.group(1)) if 1 <= int(n) <= candidate_count})
+    return CardLine(numbers=numbers, body=rest.strip())
 
 
 # 상시·마감 정책은 신청 날짜가 없어 코드로 판단함
@@ -105,22 +130,23 @@ async def _format_profile(ctx: PipelineContext) -> str:
     return "\n".join(lines) if lines else MISSING
 
 
-def _format_evidence(groups: list[PolicyGroup], policies: dict[str, PolicyRecord], today: date) -> list[str]:
+# 근거 번호가 카드 번호와 맞아야 해서 후보마다 정확히 한 블록을 만듦
+def _format_evidence(
+    candidates: list[PolicyGroup],
+    policies: dict[str, PolicyRecord],
+    documents: dict[str, list[str]],
+    today: date,
+) -> list[str]:
     blocks = []
-    for group in groups:
-        policy = policies.get(group.policy_no)
-        if policy is None:
-            continue
+    for number, group in enumerate(candidates, start=1):
+        policy = policies[group.policy_no]
         # 정책 번호는 답변에 노출되지 않도록 근거에 넣지 않음
         blocks.append("\n".join([
-            f"<정책 {len(blocks) + 1}> {policy.policy_name}",
+            f"<정책 {number}> {policy.policy_name}",
             f"[신청 상태] {_format_status(policy, today)}",
-            f"[신청 방법] {policy.application_method or MISSING}",
-            f"[제출 서류] {policy.submission_documents or MISSING}",
-            f"[담당 기관] {policy.supervising_org_name or MISSING}",
             f"[신청 링크] {policy.application_url or MISSING}",
-            "[내용]",
-            *(chunk.content for chunk in group.chunks),
+            "[정책 정보]",
+            *(documents.get(group.policy_no) or [MISSING]),
         ]))
     return blocks
 

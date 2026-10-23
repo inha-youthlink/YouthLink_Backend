@@ -78,4 +78,5 @@ PUBLIC_TRACE_KEYS = frozenset({
     "handler",
     "analysis",
     "current_policy_nos",
+    "cards",
 })

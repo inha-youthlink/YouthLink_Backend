@@ -31,7 +31,9 @@ class Settings(BaseSettings):
 
     # Retrieval
     retriever: str = "vector"
-    top_k: int = Field(default=10, ge=1)
+    # 정책마다 청크가 4개라 10이면 정책이 6~8개뿐이어서 상태 정렬 전 후보를 넉넉히 모음
+    top_k: int = Field(default=30, ge=1)
+    card_candidates: int = Field(default=5, ge=1)
 
     # Conversation
     history_turns: int = Field(default=3, ge=0)

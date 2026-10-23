@@ -1,9 +1,13 @@
+import logging
 from time import perf_counter
 
+from app.pipeline.cards import build_cards, pick_candidates
 from app.pipeline.context import PipelineContext
 from app.pipeline.generator import generate
 from app.pipeline.grouping import group_by_policy
-from app.schemas.pipeline import PipelineOutput, PolicyItem
+from app.schemas.pipeline import PipelineOutput
+
+logger = logging.getLogger(__name__)
 
 
 async def handle(ctx: PipelineContext) -> PipelineOutput:
@@ -16,26 +20,20 @@ async def handle(ctx: PipelineContext) -> PipelineOutput:
     ctx.groups = group_by_policy(chunks)
     latency["retrieve"] = _elapsed_ms(started)
 
+    # 상태 정렬에는 검색된 정책 전체의 신청 기간이, 근거에는 후보의 청크 전체가 필요해 두 번 조회함
     started = perf_counter()
     ctx.policies = await deps.policy_repository.get_by_ids([g.policy_no for g in ctx.groups])
+    ctx.candidates = pick_candidates(ctx.groups, ctx.policies, ctx.today, deps.settings.card_candidates)
+    ctx.documents = await deps.policy_repository.get_documents([g.policy_no for g in ctx.candidates])
     latency["policy_lookup"] = _elapsed_ms(started)
 
     started = perf_counter()
     result = await generate(ctx)
     latency["generate"] = _elapsed_ms(started)
 
-    policies = [
-        PolicyItem(
-            policy_no=policy.policy_no,
-            policy_name=policy.policy_name,
-            application_start_date=policy.application_start_date,
-            application_end_date=policy.application_end_date,
-            application_url=policy.application_url,
-            score=group.score,
-        )
-        for group in ctx.groups
-        if (policy := ctx.policies.get(group.policy_no)) is not None
-    ]
+    if result.card_numbers is None:
+        logger.warning("답변 첫 줄 카드 형식이 없어 후보 전체를 카드로 표시함")
+    policies = build_cards(ctx.candidates, ctx.policies, result.card_numbers)
 
     ctx.trace.update({
         "retrieved_chunks": [
@@ -50,6 +48,11 @@ async def handle(ctx: PipelineContext) -> PipelineOutput:
             for chunk in chunks
         ],
         "contexts": result.contexts,
+        "cards": {
+            "candidate_nos": [group.policy_no for group in ctx.candidates],
+            "selected": result.card_numbers,
+            "fallback": result.card_numbers is None,
+        },
         "retriever": deps.settings.retriever,
         "top_k": deps.settings.top_k,
         "prompt_version": result.prompt_version,

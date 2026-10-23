@@ -84,7 +84,7 @@ uv run pytest
 ```
 
 - `profile`은 생략할 수 있고, 각 항목도 모두 선택입니다.
-- 응답은 `answer`(답변), `policies`(관련도순 추천 정책), `trace`(실행 정보)로 구성됩니다.
+- 응답은 `answer`(답변), `policies`(카드로 보여 줄 정책, 답변 본문과 같은 순서), `trace`(실행 정보)로 구성됩니다.
 - 요청 검증 실패는 422, OpenAI·DB 호출 실패는 503을 반환합니다.
 - 자세한 형식은 `/docs`와 [5주차 작업 기록](docs/weekly/week05.md)을 참고하세요. `trace` 구성은 아래 debug 모드 기준입니다.
 
@@ -94,10 +94,11 @@ RAG 평가·디버깅용입니다. 근거 원문 같은 내부 정보는 debug �
 
 | 요청 | `trace`에 포함되는 키 |
 |---|---|
-| `POST /internal/pipeline` (기본) | `latency_ms`, `tokens`, `chat_model`, `retriever`, `top_k`, `prompt_version`, `embedding_model` |
+| `POST /internal/pipeline` (기본) | `latency_ms`, `tokens`, `chat_model`, `retriever`, `top_k`, `prompt_version`, `embedding_model`, `handler`, `analysis`, `current_policy_nos`, `cards` |
 | `POST /internal/pipeline?debug=true` | 위 키 + `contexts`, `retrieved_chunks` |
 
-- `contexts`: LLM에 넘긴 정책별 근거 블록 (`list[str]`). 정책 정보(신청 상태, 신청 방법 등)와 청크 본문이 함께 들어 있습니다. 검색된 정책이 없으면 `[]`
+- `contexts`: LLM에 넘긴 후보 정책별 근거 블록 (`list[str]`, 최대 `CARD_CANDIDATES`개). 신청 상태·링크와 그 정책의 청크 전체가 들어 있습니다. 검색된 정책이 없으면 `[]`
+- `cards`: 카드 결정 결과. `candidate_nos`(근거 순서의 후보 정책), `selected`(LLM이 고른 근거 번호, 1부터), `fallback`(답변 첫 줄 형식이 없어 후보 전체를 카드로 보인 경우 `true`)
 - `retrieved_chunks`: 검색된 청크 목록 (`chunk_id`, `policy_no`, `chunk_type`, `chunk_index`, `score`, `content`), 검색 점수순
 
 ### 채팅 API (`/api/rooms`)
