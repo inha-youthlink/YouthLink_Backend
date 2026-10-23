@@ -9,6 +9,9 @@ from app.schemas.pipeline import PolicyItem, Profile
 # chat_room.user_id VARCHAR(100)과 맞춰 DB 오류 대신 요청 검증에서 막음
 UserId = Annotated[str, Field(min_length=1, max_length=100)]
 
+# 질문은 분석·답변 생성 입력에 그대로 들어가 길이가 곧 토큰·응답 시간이라 상한을 둠
+QUESTION_MAX_CHARS = 1000
+
 
 class CreateRoomRequest(BaseModel):
     user_id: UserId
@@ -21,7 +24,7 @@ class CreateRoomResponse(BaseModel):
 
 class SendMessageRequest(BaseModel):
     user_id: UserId
-    question: str = Field(min_length=1)
+    question: str = Field(min_length=1, max_length=QUESTION_MAX_CHARS)
 
 
 # 정책 형식을 /internal/pipeline과 하나로 유지하려고 PolicyItem을 그대로 씀
