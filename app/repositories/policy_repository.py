@@ -1,4 +1,3 @@
-import time
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -13,8 +12,6 @@ NO_RESTRICTION_MARRIAGE_CODE = "0055003"
 ANNUAL_INCOME_CODE = "0043002"
 # 정책 소득 상한은 만 원 단위인데 원 단위로 들어간 값이 섞여 있어(예: 43,056,240) 이 이상은 판정하지 않음
 MAX_INCOME_MANWON = 100_000
-# 정책 지역은 ETL 동기화 때만 바뀌고, 전국 판정은 전체 정책을 집계해 느려(약 0.2초) 잠시 캐시함
-NATIONWIDE_CACHE_SECONDS = 3600
 
 _GET_BY_IDS_SQL = text("""
 SELECT policy_no, policy_name,
@@ -28,14 +25,6 @@ _LIST_REGIONS_SQL = text("""
 SELECT DISTINCT sido_code, sido_name, sigungu_name
 FROM region
 WHERE is_active
-""")
-
-# 모든 시도에 걸친 정책은 시군구 몇 곳이 빠져도 전국으로 봄 (지역 칸을 차지하지 않게)
-_NATIONWIDE_SQL = text("""
-SELECT policy_no
-FROM v_policy_region_resolved
-GROUP BY policy_no
-HAVING count(DISTINCT sido_code) = (SELECT count(DISTINCT sido_code) FROM region WHERE is_active)
 """)
 
 _GET_REGION_SCOPES_SQL = text("""
@@ -121,8 +110,6 @@ class PolicyRecord:
 class PolicyRepository:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
-        self._nationwide: frozenset[str] | None = None
-        self._nationwide_loaded_at = 0.0
 
     # ANY는 결과 순서를 보장하지 않아 dict로 반환함. 호출 측에서 묶기 결과 순서대로 꺼내 씀
     async def get_by_ids(self, policy_nos: list[str]) -> dict[str, PolicyRecord]:
@@ -143,13 +130,6 @@ class PolicyRepository:
         async with self._session_factory() as session:
             result = await session.execute(text(sql), params)
             return list(result.scalars())
-
-    async def nationwide_policy_nos(self) -> frozenset[str]:
-        if self._nationwide is None or time.monotonic() - self._nationwide_loaded_at > NATIONWIDE_CACHE_SECONDS:
-            async with self._session_factory() as session:
-                self._nationwide = frozenset((await session.execute(_NATIONWIDE_SQL)).scalars())
-            self._nationwide_loaded_at = time.monotonic()
-        return self._nationwide
 
     async def get_region_labels(self, policy_nos: list[str]) -> dict[str, str]:
         if not policy_nos:
