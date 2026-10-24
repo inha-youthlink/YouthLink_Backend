@@ -89,8 +89,9 @@ uv run pytest
 
 - `profile`은 생략할 수 있고, 각 항목도 모두 선택입니다.
 - 응답은 `answer`(답변), `policies`(카드로 보여 줄 정책, 답변 본문과 같은 순서), `trace`(실행 정보)로 구성됩니다.
-- `policies`의 각 카드: `policy_no`, `policy_name`, `application_start_date`, `application_end_date`, `application_url`, `score`, `application_status`, `supervising_org_name`
+- `policies`의 각 카드: `policy_no`, `policy_name`, `application_start_date`, `application_end_date`, `application_url`, `score`, `application_status`, `supervising_org_name`, `region_label`
   - `application_status`: 서버가 계산한 신청 상태 `OPEN`(신청 가능) / `ALWAYS_OPEN`(상시 모집) / `UPCOMING`(신청 예정) / `CLOSED`(마감) / `UNKNOWN`(기간 정보 없음). 마감 코드 정책은 기간이 남아 있어도 `CLOSED`라, 날짜는 `OPEN`·`UPCOMING`일 때만 표시하는 것을 권장합니다
+  - `region_label`: 정책 지역 표시 문구 ("서울특별시 강남구", "경기도 5곳", "전국")
   - `application_url`: 원본 신청 링크를 정리한 값(`https://` 보정, 주소가 아닌 값은 `null`). 절반 이상이 사이트 첫 화면이라 버튼 문구는 "관련 사이트"처럼 중립적으로 쓰는 것을 권장합니다
 - 요청 검증 실패는 422, OpenAI·DB 호출 실패는 503을 반환합니다.
 - 자세한 형식은 `/docs`와 [5주차 작업 기록](docs/weekly/week05.md)을 참고하세요. `trace` 구성은 아래 debug 모드 기준입니다.
@@ -101,11 +102,12 @@ RAG 평가·디버깅용입니다. 근거 원문 같은 내부 정보는 debug �
 
 | 요청 | `trace`에 포함되는 키 |
 |---|---|
-| `POST /internal/pipeline` (기본) | `latency_ms`, `tokens`, `chat_model`, `retriever`, `top_k`, `prompt_version`, `embedding_model`, `handler`, `analysis`, `current_policy_nos`, `cards` |
+| `POST /internal/pipeline` (기본) | `latency_ms`, `tokens`, `chat_model`, `retriever`, `top_k`, `prompt_version`, `embedding_model`, `handler`, `analysis`, `current_policy_nos`, `cards`, `conditions` |
 | `POST /internal/pipeline?debug=true` | 위 키 + `contexts`, `retrieved_chunks` |
 
 - `contexts`: LLM에 넘긴 후보 정책별 근거 블록 (`list[str]`, 최대 `CARD_CANDIDATES`개). 신청 상태·링크와 그 정책의 청크 전체가 들어 있습니다. 검색된 정책이 없으면 `[]`
 - `cards`: 카드 결정 결과. `candidate_nos`(근거 순서의 후보 정책), `selected`(LLM이 고른 근거 번호, 1부터), `fallback`(답변 첫 줄 형식이 없어 후보 전체를 카드로 보인 경우 `true`)
+- `conditions`: 1차 필터 조건(`lines`, 항목마다 질문·프로필 출처), 필터 후 정책 수(`filtered_policy_count`, 조건이 없으면 `null`), 지역·전국 분리 검색 여부(`split_search`)
 - `retrieved_chunks`: 검색된 청크 목록 (`chunk_id`, `policy_no`, `chunk_type`, `chunk_index`, `score`, `content`), 검색 점수순
 
 ### 채팅 API (`/api/rooms`)
