@@ -88,4 +88,5 @@ PUBLIC_TRACE_KEYS = frozenset({
     "current_policy_nos",
     "cards",
     "conditions",
+    "clarify_reason",
 })

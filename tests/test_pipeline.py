@@ -48,7 +48,7 @@ class FakeRetriever:
 
 class FakePolicyRepository:
     async def list_regions(self):
-        return [RegionRow("11", "서울특별시", "강남구"), RegionRow("28", "인천광역시", "부평구")]
+        return [RegionRow("11", "서울특별시", "강남구", "11680"), RegionRow("28", "인천광역시", "부평구", "28237")]
 
     async def get_by_ids(self, policy_nos):
         return {
@@ -164,10 +164,10 @@ async def test_question_region_different_from_profile_clarifies():
     assert llm.chat_calls == 0
     assert deps.retriever.calls == 0
     assert output.policies == []
-    assert output.answer.startswith("질문에 말씀하신 지역(인천)이 프로필 지역(서울특별시)과 달라요.")
+    assert output.answer.startswith("질문에 말씀하신 지역(인천)이 프로필 지역(서울특별시 강남구)과 달라요.")
     assert (output.trace["handler"], output.trace["clarify_reason"]) == ("clarify", "condition")
     assert output.trace["conditions"]["mismatches"] == [
-        {"name": "지역", "question": "인천", "profile": "서울특별시", "asks_back": True}
+        {"name": "지역", "question": "인천", "profile": "서울특별시 강남구", "asks_back": True}
     ]
 
 

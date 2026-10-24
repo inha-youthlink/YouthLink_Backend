@@ -6,13 +6,14 @@ from app.core.config import Settings
 from app.core.dependencies import PipelineDeps
 from app.llm.client import ChatResult
 from app.pipeline import generator
+from app.pipeline.conditions import RegionIndex, build_conditions
 from app.pipeline.context import PipelineContext
 from app.pipeline.evidence import AnswerKind, Evidence
 from app.pipeline.generator import parse_card_line
 from app.pipeline.grouping import PolicyGroup
-from app.repositories.policy_repository import PolicyRecord
+from app.repositories.policy_repository import PolicyRecord, RegionRow
 from app.schemas.policy_info import CLOSED_CODE
-from app.schemas.pipeline import PipelineInput
+from app.schemas.pipeline import PipelineInput, Profile
 
 
 @pytest.mark.parametrize(
@@ -187,3 +188,22 @@ async def test_reply_skips_llm():
     assert result.prompt_version is None
     assert result.card_numbers == [1, 2]
     assert (result.prompt_tokens, result.completion_tokens) == (0, 0)
+
+
+async def test_profile_region_and_conditions_shown_for_filtered_evidence():
+    llm = FakeLLM("[소개: 1]\n월세 지원이 있어요.")
+    ctx = _ctx(llm)
+    profile = Profile(region_code="41117")
+    ctx.input = PipelineInput(question="월세 지원 알려줘", profile=profile)
+    ctx.regions = RegionIndex([
+        RegionRow("41", "경기도", "수원시 권선구", "41113"), RegionRow("41", "경기도", "수원시 영통구", "41117"),
+    ])
+    ctx.conditions = build_conditions(None, profile, ctx.regions, {})
+    ctx.evidence = Evidence(**{**ctx.evidence.__dict__, "filtered": True})
+
+    await generator.generate(ctx)
+
+    user_message = llm.messages[1]["content"]
+    # 구가 있는 시는 시 단위로 보여 줌
+    assert "[사용자 프로필]\n지역: 경기도 수원시" in user_message
+    assert "[검색 조건]\n지역: 경기도 수원시" in user_message

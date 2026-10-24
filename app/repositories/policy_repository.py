@@ -22,7 +22,7 @@ WHERE policy_no = ANY(:policy_nos)
 """)
 
 _LIST_REGIONS_SQL = text("""
-SELECT DISTINCT sido_code, sido_name, sigungu_name
+SELECT region_code, sido_code, sido_name, sigungu_name
 FROM region
 WHERE is_active
 """)
@@ -60,12 +60,15 @@ class RegionRow:
     sido_code: str
     sido_name: str
     sigungu_name: str
+    region_code: str
 
 
-# 저장소 계층의 필터 조건. 값이 None이면 그 조건으로 거르지 않음
+# 저장소 계층의 필터 조건. 값이 None이거나 비면 그 조건으로 거르지 않음
 @dataclass(frozen=True)
 class PolicyFilter:
     sido_code: str | None = None
+    # 시군구 단위 지역 조건. 있으면 시도 조건 대신 씀 (구가 있는 시는 그 시의 구 코드 전부)
+    region_codes: tuple[str, ...] = ()
     age: int | None = None
     # condition_type(JOB, SCHOOL, MAJOR, SPECIAL) → 사용자 코드
     eligibility_codes: dict[str, str] = field(default_factory=dict)
@@ -178,9 +181,15 @@ def _build_filter_sql(policy_filter: PolicyFilter, today: date) -> tuple[str, di
     clauses: list[str] = []
     params: dict[str, Any] = {}
 
-    if policy_filter.sido_code:
-        # 전국 정책도 모든 시군구 코드를 가지므로 그 시도의 코드가 하나라도 있으면 남김
-        # 범위 View(v_policy_*_scope)는 전체 정책을 집계해 느려(약 0.3초) 정책별 해석 View를 씀
+    # 시도 전체·전국 정책도 그 안의 시군구 코드를 모두 가져 코드 하나만 맞으면 남김
+    # 범위 View(v_policy_*_scope)는 전체 정책을 집계해 느려(약 0.3초) 정책별 해석 View를 씀
+    if policy_filter.region_codes:
+        clauses.append("""EXISTS (
+    SELECT 1 FROM v_policy_region_resolved v
+    WHERE v.policy_no = p.policy_no AND v.resolved_region_code = ANY(:region_codes)
+)""")
+        params["region_codes"] = list(policy_filter.region_codes)
+    elif policy_filter.sido_code:
         clauses.append("""EXISTS (
     SELECT 1 FROM v_policy_region_resolved v
     WHERE v.policy_no = p.policy_no AND v.sido_code = :sido_code
