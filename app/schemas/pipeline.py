@@ -59,6 +59,8 @@ class PolicyItem(BaseModel):
     # 날짜만으로는 상시·마감 코드·정보 없음을 구분할 수 없어 서버가 계산한 상태를 함께 줌
     application_status: ApplicationStatus | None = None
     supervising_org_name: str | None = None
+    # 정책 지역이 여러 곳이거나 시군구 단위라 코드 하나로 나타낼 수 없어 표시 문구로 줌 ("서울특별시 강남구", "전국")
+    region_label: str | None = None
 
 
 class PipelineOutput(BaseModel):
@@ -84,4 +86,5 @@ PUBLIC_TRACE_KEYS = frozenset({
     "analysis",
     "current_policy_nos",
     "cards",
+    "conditions",
 })

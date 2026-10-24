@@ -124,5 +124,5 @@ async def test_generate_uses_whole_documents_of_candidates():
     ) in user_message
     assert result.card_numbers == [2]
     assert result.answer == "전세 이자 지원은 마감되었어요."
-    assert result.prompt_version == "generate_v3"
+    assert result.prompt_version == "generate_v4"
     assert len(result.contexts) == 2

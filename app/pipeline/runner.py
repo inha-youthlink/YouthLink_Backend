@@ -15,8 +15,8 @@ async def run_pipeline(inp: PipelineInput, deps: PipelineDeps) -> PipelineOutput
     ctx.analysis = await analyzer.analyze(ctx)
     ctx.trace["latency_ms"] = {"analyze": _elapsed_ms(started)}
     ctx.trace["analysis"] = ctx.analysis.to_trace()
-    # 핸들러는 ctx.query로 검색과 답변 생성을 하므로 맥락이 풀린 질문으로 바꿔 둠
-    ctx.query = ctx.analysis.search_query(inp.question)
+    ctx.query = ctx.analysis.standalone_question(inp.question)
+    ctx.search_query = ctx.analysis.search_query(inp.question)
     ctx.current_policies = update_current_policies(inp, ctx.analysis)
     ctx.trace["current_policy_nos"] = [policy.policy_no for policy in ctx.current_policies]
 

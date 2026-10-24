@@ -9,7 +9,7 @@ from app.llm.client import ParsedResult
 from app.pipeline import analyzer
 from app.pipeline.analyzer import FallbackReason
 from app.pipeline.context import PipelineContext
-from app.schemas.analysis import Intent, QueryAnalysis, StatusFilter, SubQuery
+from app.schemas.analysis import Intent, JobStatus, QueryAnalysis, SchoolLevel, StatusFilter, SubQuery
 from app.schemas.pipeline import ConversationTurn, PipelineInput, PolicyRef
 
 MONTHLY_RENT = PolicyRef(policy_no="P-RENT", policy_name="청년 월세 지원")
@@ -32,9 +32,13 @@ class FakeLLM:
         return self._result
 
 
-def _sub(question: str, refs: list[str], intent: Intent = Intent.POLICY_DETAIL) -> SubQuery:
+def _sub(
+    question: str, refs: list[str], intent: Intent = Intent.POLICY_DETAIL, search_query: str = "", **conditions
+) -> SubQuery:
+    values = {"region": "", "age": None, "job_status": JobStatus.NONE, "school": SchoolLevel.NONE, **conditions}
     return SubQuery(
-        standalone_question=question, target_refs=refs, intent=intent, status_filter=StatusFilter.NONE
+        standalone_question=question, search_query=search_query, target_refs=refs, intent=intent,
+        status_filter=StatusFilter.NONE, **values,
     )
 
 
@@ -123,16 +127,39 @@ async def test_refs_resolved_and_invalid_refs_dropped():
     assert result.model == "fake-analysis-model"
 
 
-async def test_search_query_uses_standalone_questions():
-    single = await analyzer.analyze(_ctx(PipelineInput(question="두 번째 거 신청 방법은?"), FakeLLM(
-        _parsed(_sub("청년 이사비 지원 신청 방법", []))
+async def test_standalone_question_and_search_query():
+    single = await analyzer.analyze(_ctx(PipelineInput(question="서울 주거 지원 알려줘"), FakeLLM(
+        _parsed(_sub("서울 청년 주거 지원 정책은?", [], search_query="청년 주거 지원", region="서울"))
     )))
     multi = await analyzer.analyze(_ctx(PipelineInput(question="이사비 그건 서류? 월세랑 같이 돼?"), FakeLLM(
-        _parsed(_sub("청년 이사비 지원 서류", []), _sub("청년 이사비 지원과 월세 지원 중복", []))
+        _parsed(
+            _sub("청년 이사비 지원 서류", [], search_query="청년 이사비 지원 서류"),
+            _sub("청년 이사비 지원과 월세 지원 중복", [], search_query="청년 이사비 월세 중복"),
+        )
+    )))
+    # 인사처럼 검색어가 비면 독립 질문으로 검색함
+    chitchat = await analyzer.analyze(_ctx(PipelineInput(question="안녕"), FakeLLM(
+        _parsed(_sub("안녕", [], intent=Intent.CHITCHAT))
     )))
 
-    assert single.search_query("두 번째 거 신청 방법은?") == "청년 이사비 지원 신청 방법"
-    assert multi.search_query("원래 질문") == "청년 이사비 지원 서류 청년 이사비 지원과 월세 지원 중복"
+    assert single.standalone_question("원래") == "서울 청년 주거 지원 정책은?"
+    assert single.search_query("원래") == "청년 주거 지원"
+    assert multi.standalone_question("원래") == "청년 이사비 지원 서류 청년 이사비 지원과 월세 지원 중복"
+    assert multi.search_query("원래") == "청년 이사비 지원 서류 청년 이사비 월세 중복"
+    assert chitchat.search_query("원래") == "안녕"
+
+
+async def test_conditions_kept_and_invalid_age_dropped():
+    result = await analyzer.analyze(_ctx(PipelineInput(question="q"), FakeLLM(_parsed(
+        _sub("q", [], region=" 인천 부평구 ", age=32, job_status=JobStatus.UNEMPLOYED, school=SchoolLevel.GRADUATE_SCHOOL),
+        _sub("q2", [], age=250),
+    ))))
+
+    first, second = result.sub_queries
+    assert (first.region, first.age, first.job_status, first.school) == (
+        "인천 부평구", 32, JobStatus.UNEMPLOYED, SchoolLevel.GRADUATE_SCHOOL
+    )
+    assert second.age is None
 
 
 async def test_sub_queries_limited():
@@ -172,20 +199,27 @@ async def test_trace_after_success():
         question="두 번째 거 신청 방법은?",
         history=[ConversationTurn(question="q", answer="a", policies=[MONTHLY_RENT, MOVING])],
     )
-    llm = FakeLLM(_parsed(_sub("청년 이사비 지원 신청 방법", ["2", "9"])))
+    llm = FakeLLM(_parsed(_sub(
+        "청년 이사비 지원 신청 방법", ["2", "9"], search_query="청년 이사비 지원 신청 방법", age=27
+    )))
 
     trace = (await analyzer.analyze(_ctx(inp, llm))).to_trace()
 
     assert json.loads(json.dumps(trace)) == {
-        "prompt_version": "analyze_v2",
+        "prompt_version": "analyze_v3",
         "model": "fake-analysis-model",
         "tokens": {"prompt": 100, "completion": 20},
         "sub_queries": [{
             "standalone_question": "청년 이사비 지원 신청 방법",
+            "search_query": "청년 이사비 지원 신청 방법",
             "target_refs": ["2", "9"],
             "target_policy_nos": [MOVING.policy_no],
             "intent": "policy_detail",
             "status_filter": "none",
+            "region": "",
+            "age": 27,
+            "job_status": "없음",
+            "school": "없음",
         }],
         "is_new_topic": False,
         "fallback_reason": None,

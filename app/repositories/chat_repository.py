@@ -6,6 +6,7 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.repositories.policy_repository import fetch_region_labels
 from app.schemas.chat import MessageItem, RoomItem
 from app.schemas.pipeline import ConversationTurn, PolicyItem, PolicyRef, Profile
 from app.schemas.policy_info import application_status, clean_url, today_kst
@@ -160,8 +161,9 @@ class ChatRepository:
         today = today_kst()
         refs: dict[int, list[PolicyItem]] = {}
         async with self._session_factory() as session:
-            result = await session.execute(_LIST_POLICY_REFS_SQL, {"message_ids": message_ids})
-            for row in result.mappings():
+            rows = list((await session.execute(_LIST_POLICY_REFS_SQL, {"message_ids": message_ids})).mappings())
+            labels = await fetch_region_labels(session, list({row["policy_no"] for row in rows}))
+            for row in rows:
                 refs.setdefault(row["message_id"], []).append(PolicyItem(
                     policy_no=row["policy_no"],
                     policy_name=row["policy_name"],
@@ -176,6 +178,7 @@ class ChatRepository:
                         today,
                     ),
                     supervising_org_name=row["supervising_org_name"],
+                    region_label=labels.get(row["policy_no"]),
                 ))
         return refs
 

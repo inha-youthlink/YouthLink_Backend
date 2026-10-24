@@ -1,6 +1,6 @@
 from datetime import date
 
-from app.pipeline.cards import build_cards, pick_candidates
+from app.pipeline.cards import build_cards, pick_candidates, pick_split_candidates
 from app.schemas.policy_info import ALWAYS_OPEN_CODE, CLOSED_CODE, ApplicationStatus
 from app.pipeline.grouping import PolicyGroup
 from app.repositories.policy_repository import PolicyRecord
@@ -72,7 +72,7 @@ def test_candidates_keep_clear_top_regardless_of_status():
 
 
 def test_clear_top_counts_same_name_policies_together():
-    # 같은 이름의 두 공고(마감, 예정)가 1·2위면 둘을 한 묶음으로 보고 다음 정책과 비교해 둘 다 남김
+    # 같은 이름의 두 공고(마감, 예정)가 1·2위면 한 묶음으로 보고 다음 정책과 비교하며, 상태가 앞선 예정 공고만 남김
     policies = {
         **POLICIES,
         "NEXT-YEAR": PolicyRecord(
@@ -90,7 +90,7 @@ def test_clear_top_counts_same_name_policies_together():
 
     candidates = pick_candidates(groups, policies, TODAY, limit=3)
 
-    assert [c.policy_no for c in candidates] == ["OPEN", "NEXT-YEAR", "CLOSED"]
+    assert [c.policy_no for c in candidates] == ["OPEN", "ALWAYS", "NEXT-YEAR"]
 
 
 def test_candidates_follow_status_when_top_is_not_clear():
@@ -135,3 +135,44 @@ def test_cards_fall_back_to_all_candidates():
     cards = build_cards(_groups("OPEN", "ALWAYS"), POLICIES, None, TODAY)
 
     assert [card.policy_no for card in cards] == ["OPEN", "ALWAYS"]
+
+
+def test_candidates_keep_one_per_policy_name():
+    # 같은 이름(연도·지역별 공고)이 후보 칸을 나눠 쓰지 않음
+    policies = {
+        **POLICIES,
+        "OPEN-2": PolicyRecord(
+            policy_no="OPEN-2", policy_name="정책 OPEN", application_period_type_code=ALWAYS_OPEN_CODE,
+            application_start_date=None, application_end_date=None,
+            application_url=None, reference_url_1=None, reference_url_2=None, supervising_org_name=None,
+        ),
+    }
+    groups = [
+        PolicyGroup("OPEN", 0.60, []), PolicyGroup("OPEN-2", 0.59, []),
+        PolicyGroup("ALWAYS", 0.58, []), PolicyGroup("UNKNOWN", 0.57, []),
+    ]
+
+    candidates = pick_candidates(groups, policies, TODAY, limit=3)
+
+    assert [c.policy_no for c in candidates] == ["OPEN", "ALWAYS", "UNKNOWN"]
+
+
+
+def test_split_candidates_take_half_each_and_fill_shortage():
+    policies = {
+        no: PolicyRecord(
+            policy_no=no, policy_name=f"정책 {no}", application_period_type_code=ALWAYS_OPEN_CODE,
+            application_start_date=None, application_end_date=None,
+            application_url=None, reference_url_1=None, reference_url_2=None, supervising_org_name=None,
+        )
+        for no in ["L1", "L2", "L3", "L4", "N1", "N2", "N3", "N4"]
+    }
+    local = [PolicyGroup(no, 0.9 - i * 0.01, []) for i, no in enumerate(["L1", "L2", "L3", "L4"])]
+    national = [PolicyGroup(no, 0.95 - i * 0.01, []) for i, no in enumerate(["N1", "N2", "N3", "N4"])]
+
+    even = pick_split_candidates(local, national, policies, TODAY, limit=6)
+    # 지역 정책이 하나뿐이면 나머지는 전국 정책으로 채움
+    short = pick_split_candidates(local[:1], national, policies, TODAY, limit=6)
+
+    assert {c.policy_no for c in even} == {"L1", "L2", "L3", "N1", "N2", "N3"}
+    assert {c.policy_no for c in short} == {"L1", "N1", "N2", "N3", "N4"}
