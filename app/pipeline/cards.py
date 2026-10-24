@@ -3,7 +3,7 @@ from datetime import date
 from app.pipeline.grouping import PolicyGroup
 from app.repositories.policy_repository import PolicyRecord
 from app.schemas.pipeline import PolicyItem
-from app.schemas.policy_info import ApplicationStatus, application_status, clean_url
+from app.schemas.policy_info import ApplicationStatus, application_status
 
 # 신청 가능한 정책을 먼저 보여 주고, 기간을 모르는 정책은 마감보다 앞에 둠
 STATUS_RANK = {
@@ -101,17 +101,7 @@ def build_cards(
 ) -> list[PolicyItem]:
     chosen = candidates if numbers is None else [candidates[number - 1] for number in numbers]
     return [
-        PolicyItem(
-            policy_no=group.policy_no,
-            policy_name=policy.policy_name,
-            application_start_date=policy.application_start_date,
-            application_end_date=policy.application_end_date,
-            application_url=clean_url(policy.application_url),
-            score=group.score,
-            application_status=status_of(policy, today),
-            supervising_org_name=policy.supervising_org_name,
-            region_label=(region_labels or {}).get(group.policy_no),
-        )
+        policy.to_item(group.score, today, (region_labels or {}).get(group.policy_no))
         for group in chosen
         if (policy := policies.get(group.policy_no)) is not None
     ]

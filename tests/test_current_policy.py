@@ -87,3 +87,16 @@ def test_failed_analysis_keeps_current_policies():
     )
 
     assert update_current_policies(_input([MOVING]), failed) == [MOVING]
+
+
+# 일부만 확인된 지목은 되묻기로 가므로 현재 정책을 그 일부로 바꾸지 않음
+def test_unresolved_ref_keeps_current_policies():
+    sub = ResolvedSubQuery(
+        standalone_question="질문", target_refs=["1", "5"], targets=[RENT], intent=Intent.COMPARISON,
+        status_filter=StatusFilter.NONE, unresolved_refs=["5"],
+    )
+    analysis = AnalysisResult(
+        sub_queries=[sub], is_new_topic=False, fallback_reason=None, prompt_version="analyze_v3", model="m"
+    )
+
+    assert update_current_policies(_input([MOVING, LOAN]), analysis) == [MOVING, LOAN]

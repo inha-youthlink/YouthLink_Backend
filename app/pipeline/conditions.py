@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 from app.pipeline.analyzer import AnalysisResult
+from app.pipeline.context import PipelineContext
 from app.repositories.policy_repository import PolicyFilter, RegionRow
 from app.schemas.analysis import JobStatus, SchoolLevel, StatusFilter
 from app.schemas.pipeline import Profile
@@ -38,8 +39,9 @@ SIDO_ALIASES = {
     "전남": "전남광주",
     "광주": "전남광주",
     "광주광역시": "전남광주",
-    "광주시": "전남광주",
 }
+# 경기도 광주시와 광주광역시를 함께 가리켜 시도를 정할 수 없음
+AMBIGUOUS_NAMES = ("광주시",)
 SIDO_SUFFIXES = ("특별자치시", "특별자치도", "통합특별시", "특별시", "광역시")
 
 
@@ -104,6 +106,8 @@ class RegionIndex:
         for sigungu, codes in sido_by_sigungu.items():
             if len(codes) == 1:
                 self._by_name.setdefault(sigungu, next(iter(codes)))
+        for name in AMBIGUOUS_NAMES:
+            self._by_name.pop(name, None)
 
     # 앞쪽 단어부터 시도를 찾아 "인천 부평구"는 인천, "강남구"는 서울로 봄
     def resolve(self, text: str) -> str | None:
@@ -112,6 +116,26 @@ class RegionIndex:
             if code:
                 return code
         return None
+
+
+# 1차 필터와 답변 생성의 프로필 표시가 함께 써서 요청마다 한 번만 조회함
+async def load_regions(ctx: PipelineContext) -> RegionIndex:
+    if ctx.regions is None:
+        ctx.regions = RegionIndex(await ctx.deps.policy_repository.list_regions())
+    return ctx.regions
+
+
+async def load_code_names(ctx: PipelineContext) -> dict[str, str]:
+    if ctx.code_names is None:
+        profile = ctx.input.profile
+        codes = [
+            code for code in (
+                profile.job_code, profile.school_code, profile.major_code,
+                profile.special_target_code, profile.marriage_status_code,
+            ) if code
+        ]
+        ctx.code_names = await ctx.deps.common_code_repository.get_names(codes)
+    return ctx.code_names
 
 
 def build_conditions(

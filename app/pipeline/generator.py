@@ -1,15 +1,25 @@
 import re
 from dataclasses import dataclass
 from datetime import date
-from pathlib import Path
 
 from app.pipeline.cards import status_of
+from app.pipeline.conditions import load_code_names, load_regions
 from app.pipeline.context import PipelineContext
+from app.pipeline.evidence import AnswerKind
 from app.pipeline.grouping import PolicyGroup
+from app.pipeline.prompts import load_prompt
 from app.repositories.policy_repository import PolicyRecord
 from app.schemas.policy_info import ApplicationStatus, clean_url
 
-PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+COMMON_PROMPT = "answer_common_v1"
+# 카드를 LLM이 고를 때만 첫 줄 [소개: …] 형식을 붙임
+CARDS_PROMPT = "answer_cards_v1"
+KIND_PROMPTS = {
+    AnswerKind.RECOMMEND: "answer_recommend_v1",
+    AnswerKind.DETAIL: "answer_detail_v1",
+}
+# 근거가 없어 근거 사용 규칙이 담긴 공통 조각을 넣지 않음
+SHORT_PROMPT = "answer_short_v1"
 
 NO_RESTRICTION_NAME = "제한없음"
 MISSING = "정보 없음"
@@ -40,13 +50,14 @@ STATUS_LABELS = {
 @dataclass(frozen=True)
 class GenerationResult:
     answer: str
-    prompt_version: str
+    # 조립한 조각 이름을 +로 이음. LLM을 부르지 않은 답변은 None
+    prompt_version: str | None
     # 평가 서버가 근거 템플릿을 복제하지 않도록 LLM에 넘긴 정책별 근거 블록을 그대로 전달함
     contexts: list[str]
     # 카드로 보여 줄 근거 번호 (1부터, 오름차순). None이면 첫 줄 형식을 어긴 경우
     card_numbers: list[int] | None
-    prompt_tokens: int
-    completion_tokens: int
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -55,34 +66,53 @@ class CardLine:
     body: str
 
 
-async def generate(ctx: PipelineContext, prompt_name: str = "generate_v4") -> GenerationResult:
-    system_prompt = (PROMPTS_DIR / f"{prompt_name}.md").read_text(encoding="utf-8")
-    profile_text = await _format_profile(ctx)
-    contexts = _format_evidence(ctx.candidates, ctx.policies, ctx.documents, ctx.today)
-    evidence = "\n\n".join(contexts) if contexts else NO_EVIDENCE
-    sections = [
-        f"[오늘 날짜]\n{ctx.today.isoformat()}",
-        f"[사용자 프로필]\n{profile_text}",
-    ]
-    # 근거가 조건으로 걸러졌음을 알아야 프로필과 다른 조건을 안내하고, 결과가 없을 때 이유를 말할 수 있음
-    if ctx.conditions and ctx.conditions.lines:
-        sections.append("[검색 조건]\n" + "\n".join(ctx.conditions.lines))
-    sections += [f"[근거]\n{evidence}", f"[질문]\n{ctx.query}"]
-    user_message = "\n\n".join(sections)
+async def generate(ctx: PipelineContext) -> GenerationResult:
+    evidence = ctx.evidence
+    all_cards = list(range(1, len(evidence.candidates) + 1))
+    if evidence.reply is not None:
+        return GenerationResult(answer=evidence.reply, prompt_version=None, contexts=[], card_numbers=all_cards)
 
+    if ctx.answer_kind == AnswerKind.SHORT:
+        prompt_names = [SHORT_PROMPT]
+        contexts: list[str] = []
+        user_message = f"[질문]\n{ctx.query}"
+    else:
+        prompt_names = [
+            COMMON_PROMPT, *([] if evidence.fixed_cards else [CARDS_PROMPT]), KIND_PROMPTS[ctx.answer_kind]
+        ]
+        contexts = _format_evidence(evidence.candidates, evidence.policies, evidence.documents, ctx.today)
+        user_message = await _user_message(ctx, contexts)
+
+    system_prompt = "\n\n".join(load_prompt(name) for name in prompt_names)
     result = await ctx.deps.llm.chat([
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
     ])
-    card_line = parse_card_line(result.text, len(contexts))
+    card_line = (
+        CardLine(numbers=all_cards, body=result.text.strip()) if evidence.fixed_cards
+        else parse_card_line(result.text, len(contexts))
+    )
     return GenerationResult(
         answer=card_line.body,
-        prompt_version=prompt_name,
+        prompt_version="+".join(prompt_names),
         contexts=contexts,
         card_numbers=card_line.numbers,
         prompt_tokens=result.prompt_tokens,
         completion_tokens=result.completion_tokens,
     )
+
+
+async def _user_message(ctx: PipelineContext, contexts: list[str]) -> str:
+    sections = [
+        f"[오늘 날짜]\n{ctx.today.isoformat()}",
+        f"[사용자 프로필]\n{await _format_profile(ctx)}",
+    ]
+    # 근거가 조건으로 걸러졌음을 알아야 프로필과 다른 조건을 안내하고, 결과가 없을 때 이유를 말할 수 있음
+    if ctx.conditions and ctx.conditions.lines:
+        sections.append("[검색 조건]\n" + "\n".join(ctx.conditions.lines))
+    evidence = "\n\n".join(contexts) if contexts else NO_EVIDENCE
+    sections += [f"[근거]\n{evidence}", f"[질문]\n{ctx.query}"]
+    return "\n\n".join(sections)
 
 
 def parse_card_line(text: str, candidate_count: int) -> CardLine:
@@ -97,11 +127,10 @@ def parse_card_line(text: str, candidate_count: int) -> CardLine:
 
 async def _format_profile(ctx: PipelineContext) -> str:
     profile = ctx.input.profile
-    codes = [getattr(profile, field) for field in PROFILE_CODE_LABELS if getattr(profile, field)]
-    code_names = await ctx.deps.common_code_repository.get_names(codes)
+    code_names = await load_code_names(ctx)
 
     lines = []
-    region_name = ctx.regions.sido_names.get(profile.region_code[:2]) if ctx.regions and profile.region_code else None
+    region_name = (await load_regions(ctx)).sido_names.get(profile.region_code[:2]) if profile.region_code else None
     if region_name:
         lines.append(f"지역: {region_name}")
     if profile.age is not None:

@@ -13,6 +13,7 @@ REGIONS = RegionIndex([
     RegionRow("28", "인천광역시", "중구"),
     RegionRow("43", "충청북도", "청주시"),
     RegionRow("12", "전남광주통합특별시", "북구"),
+    RegionRow("41", "경기도", "광주시"),
 ])
 PROFILE = Profile(
     age=27, region_code="11680", job_code="0013003", school_code="0049005",
@@ -42,6 +43,8 @@ def _sub(**fields) -> ResolvedSubQuery:
         ("인천 부평구", "28"), ("충북", "43"), ("충청북도", "43"), ("광주", "12"), ("전남", "12"),
         # 여러 시도에 있는 구 이름은 시도를 정할 수 없음
         ("중구", None), ("판교", None),
+        # 광주시는 경기도 광주시와 광주광역시 중 어느 쪽인지 알 수 없음
+        ("광주시", None), ("경기 광주시", "41"), ("광주광역시", "12"),
     ],
 )
 def test_region_index_resolve(text, code):
