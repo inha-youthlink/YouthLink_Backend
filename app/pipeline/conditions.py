@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Any
 
 from app.pipeline.analyzer import AnalysisResult
 from app.pipeline.context import PipelineContext
@@ -6,8 +7,12 @@ from app.repositories.policy_repository import PolicyFilter, RegionRow
 from app.schemas.analysis import JobStatus, SchoolLevel, StatusFilter
 from app.schemas.pipeline import Profile
 
-QUESTION = "질문"
-PROFILE = "프로필"
+REGION = "지역"
+AGE = "나이"
+JOB = "취업 상태"
+SCHOOL = "학력"
+# 다른 지역·나이로 거른 결과는 프로필 결과와 전혀 달라 되묻고, 취업 상태·학력은 가정 질문이 많아 답변에서 짚음
+ASK_BACK_NAMES = frozenset({REGION, AGE})
 
 JOB_CODES = {
     JobStatus.EMPLOYED: "0013001",
@@ -49,7 +54,18 @@ SIDO_SUFFIXES = ("특별자치시", "특별자치도", "통합특별시", "특�
 class Condition:
     code: str | int
     label: str
-    source: str
+
+
+# 질문에서 말한 조건이 프로필과 다른 경우. 거르는 데는 쓰지 않음
+@dataclass(frozen=True)
+class Mismatch:
+    name: str
+    question: str
+    profile: str
+
+    @property
+    def asks_back(self) -> bool:
+        return self.name in ASK_BACK_NAMES
 
 
 @dataclass(frozen=True)
@@ -58,15 +74,17 @@ class SearchConditions:
     age: Condition | None = None
     job: Condition | None = None
     school: Condition | None = None
-    # 질문에서 뽑지 않는 조건은 프로필 값만 씀
     major: Condition | None = None
     special: Condition | None = None
     marriage: Condition | None = None
     income: Condition | None = None
     open_only: bool = False
-    # 질문에 지역이 있었지만 시도로 바꿀 수 없어 지역으로 거르지 않은 경우
-    unresolved_region: str = ""
+    mismatches: list[Mismatch] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
+
+    @property
+    def ask_back(self) -> list[Mismatch]:
+        return [mismatch for mismatch in self.mismatches if mismatch.asks_back]
 
     def to_filter(self) -> PolicyFilter:
         codes = {
@@ -85,6 +103,15 @@ class SearchConditions:
             exclude_closed=self.open_only,
             exclude_upcoming=self.open_only,
         )
+
+    def to_trace(self) -> dict[str, Any]:
+        return {
+            "lines": self.lines,
+            "mismatches": [
+                {"name": m.name, "question": m.question, "profile": m.profile, "asks_back": m.asks_back}
+                for m in self.mismatches
+            ],
+        }
 
 
 class RegionIndex:
@@ -144,81 +171,73 @@ def build_conditions(
     regions: RegionIndex,
     code_names: dict[str, str],
 ) -> SearchConditions:
-    # 분석이 실패하면 질문 조건을 알 수 없어, 질문과 다른 프로필 조건으로 잘못 거르지 않도록 거르지 않음
-    if analysis is None or analysis.fallback_reason is not None:
-        return SearchConditions()
-
-    subs = analysis.sub_queries
-    question_region = next((sub.region for sub in subs if sub.region), "")
-    question_age = next((sub.age for sub in subs if sub.age is not None), None)
-    question_job = next((sub.job_status for sub in subs if sub.job_status != JobStatus.NONE), None)
-    question_school = next((sub.school for sub in subs if sub.school != SchoolLevel.NONE), None)
-
-    region, unresolved = _region(question_region, profile, regions)
+    # 질문 조건 추출이 틀려도 맞는 정책이 빠지지 않도록 거르는 조건은 프로필 값만 씀
+    region_code = profile.region_code[:2] if profile.region_code else None
+    region = (
+        Condition(region_code, regions.sido_names[region_code]) if region_code in regions.sido_names else None
+    )
+    subs = [] if analysis is None or analysis.fallback_reason is not None else analysis.sub_queries
     conditions = SearchConditions(
         region=region,
-        age=(
-            Condition(question_age, f"{question_age}세", QUESTION) if question_age is not None
-            else Condition(profile.age, f"{profile.age}세", PROFILE) if profile.age is not None
-            else None
-        ),
-        job=(
-            Condition(JOB_CODES[question_job], question_job.value, QUESTION) if question_job
-            else _profile_code(profile.job_code, code_names)
-        ),
-        school=(
-            Condition(SCHOOL_CODES[question_school], question_school.value, QUESTION) if question_school
-            else _profile_code(profile.school_code, code_names)
-        ),
+        age=Condition(profile.age, f"{profile.age}세") if profile.age is not None else None,
+        job=_profile_code(profile.job_code, code_names),
+        school=_profile_code(profile.school_code, code_names),
         major=_profile_code(profile.major_code, code_names),
         special=_profile_code(profile.special_target_code, code_names),
         marriage=_profile_code(profile.marriage_status_code, code_names),
         income=(
-            Condition(profile.annual_income, f"{profile.annual_income:,}원", PROFILE)
+            Condition(profile.annual_income, f"{profile.annual_income:,}원")
             if profile.annual_income is not None else None
         ),
         open_only=any(sub.status_filter == StatusFilter.OPEN_ONLY for sub in subs),
-        unresolved_region=unresolved,
     )
-    return SearchConditions(**{**conditions.__dict__, "lines": _lines(conditions)})
+    mismatches = _mismatches(analysis, conditions, regions) if subs else []
+    return SearchConditions(**{
+        **conditions.__dict__, "mismatches": mismatches, "lines": _lines(conditions, mismatches),
+    })
 
 
-def _region(question_region: str, profile: Profile, regions: RegionIndex) -> tuple[Condition | None, str]:
-    if question_region:
-        code = regions.resolve(question_region)
-        # 질문에 지역이 있는데 알 수 없으면 프로필 지역으로 거르면 질문과 다른 지역만 남아 거르지 않음
-        if code is None:
-            return None, question_region
-        return Condition(code, regions.sido_names[code], QUESTION), ""
-    if profile.region_code:
-        code = profile.region_code[:2]
-        if code in regions.sido_names:
-            return Condition(code, regions.sido_names[code], PROFILE), ""
-    return None, ""
+# 복합 질문은 하위 질문 하나라도 다르면 그 하위 질문의 결과가 틀리므로 모든 하위 질문을 봄
+def _mismatches(analysis: AnalysisResult, conditions: SearchConditions, regions: RegionIndex) -> list[Mismatch]:
+    found: dict[str, Mismatch] = {}
+    for sub in analysis.sub_queries:
+        candidates = [
+            # 시도로 바꿀 수 없는 지역("판교")은 다르다고 단정할 수 없어 프로필로 거름
+            (REGION, sub.region, conditions.region, regions.resolve(sub.region) if sub.region else None),
+            (AGE, f"{sub.age}세" if sub.age is not None else "", conditions.age, sub.age),
+            (JOB, sub.job_status.value, conditions.job, JOB_CODES.get(sub.job_status)),
+            (SCHOOL, sub.school.value, conditions.school, SCHOOL_CODES.get(sub.school)),
+        ]
+        for name, question, profile, code in candidates:
+            if code is not None and profile is not None and str(code) != str(profile.code):
+                found.setdefault(name, Mismatch(name, question, profile.label))
+    return [found[name] for name in (REGION, AGE, JOB, SCHOOL) if name in found]
 
 
 def _profile_code(code: str | None, code_names: dict[str, str]) -> Condition | None:
     if not code:
         return None
-    return Condition(code, code_names.get(code, code), PROFILE)
+    return Condition(code, code_names.get(code, code))
 
 
-def _lines(conditions: SearchConditions) -> list[str]:
+def _lines(conditions: SearchConditions, mismatches: list[Mismatch]) -> list[str]:
     labeled = [
-        ("지역", conditions.region),
-        ("나이", conditions.age),
-        ("취업 상태", conditions.job),
-        ("학력", conditions.school),
+        (REGION, conditions.region),
+        (AGE, conditions.age),
+        (JOB, conditions.job),
+        (SCHOOL, conditions.school),
         ("전공", conditions.major),
         ("특화 대상", conditions.special),
         ("혼인 상태", conditions.marriage),
         ("연소득", conditions.income),
     ]
-    lines = [f"{name}: {condition.label} ({condition.source})" for name, condition in labeled if condition]
-    if conditions.unresolved_region:
-        lines.append(f"지역: {conditions.unresolved_region} (질문, 지역 코드로 바꿀 수 없어 거르지 않음)")
+    lines = [f"{name}: {condition.label}" for name, condition in labeled if condition]
     if conditions.open_only:
-        lines.append("신청 상태: 지금 신청 가능한 정책만 (질문)")
+        lines.append("신청 상태: 지금 신청 가능한 정책만")
+    lines += [
+        f"질문에서 말한 {mismatch.name}: {mismatch.question} (프로필과 달라 프로필 기준으로 찾음)"
+        for mismatch in mismatches
+    ]
     return lines
 
 

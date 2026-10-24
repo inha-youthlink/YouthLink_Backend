@@ -1,7 +1,6 @@
 from time import perf_counter
 
 from app.pipeline.cards import local_first, pick_candidates
-from app.pipeline.conditions import build_conditions, load_code_names, load_regions
 from app.pipeline.context import PipelineContext
 from app.pipeline.evidence import Evidence
 from app.pipeline.grouping import group_by_policy
@@ -12,10 +11,8 @@ async def collect(ctx: PipelineContext) -> Evidence:
     latency = ctx.trace.setdefault("latency_ms", {})
 
     started = perf_counter()
-    regions = await load_regions(ctx)
-    code_names = await load_code_names(ctx)
-    ctx.conditions = build_conditions(ctx.analysis, ctx.input.profile, regions, code_names)
-    policy_filter = ctx.conditions.to_filter()
+    conditions = ctx.conditions
+    policy_filter = conditions.to_filter()
     policy_ids = (
         None if policy_filter.is_empty()
         else await deps.policy_repository.filter_policy_nos(policy_filter, ctx.today)
@@ -37,10 +34,13 @@ async def collect(ctx: PipelineContext) -> Evidence:
     documents = await deps.policy_repository.get_documents(candidate_nos)
     region_labels = await deps.policy_repository.get_region_labels(candidate_nos)
     # 근거 순서가 카드 순서라 지역 조건이 있으면 그 시도 정책을 앞에 둠
-    if ctx.conditions.region is not None:
-        candidates = local_first(candidates, region_labels, ctx.conditions.region.label)
+    if conditions.region is not None:
+        candidates = local_first(candidates, region_labels, conditions.region.label)
     latency["policy_lookup"] = _elapsed_ms(started)
 
+    ctx.trace.setdefault("conditions", {})["filtered_policy_count"] = (
+        None if policy_ids is None else len(policy_ids)
+    )
     ctx.trace.update({
         "retrieved_chunks": [
             {
@@ -53,12 +53,10 @@ async def collect(ctx: PipelineContext) -> Evidence:
             }
             for chunk in chunks
         ],
-        "conditions": {
-            "lines": ctx.conditions.lines,
-            "filtered_policy_count": None if policy_ids is None else len(policy_ids),
-        },
     })
-    return Evidence(candidates=candidates, policies=policies, documents=documents, region_labels=region_labels)
+    return Evidence(
+        candidates=candidates, policies=policies, documents=documents, region_labels=region_labels, filtered=True
+    )
 
 
 def _elapsed_ms(started: float) -> int:

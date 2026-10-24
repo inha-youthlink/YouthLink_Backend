@@ -5,6 +5,7 @@ from time import perf_counter
 from app.core.dependencies import PipelineDeps
 from app.pipeline import analyzer
 from app.pipeline.cards import build_cards
+from app.pipeline.conditions import build_conditions, load_code_names, load_regions
 from app.pipeline.context import PipelineContext
 from app.pipeline.current_policy import update_current_policies
 from app.pipeline.evidence import Evidence
@@ -36,7 +37,13 @@ async def run_pipeline(inp: PipelineInput, deps: PipelineDeps) -> PipelineOutput
     ctx.current_policies = update_current_policies(inp, ctx.analysis)
     ctx.trace["current_policy_nos"] = [policy.policy_no for policy in ctx.current_policies]
 
-    route = choose_route(ctx.analysis)
+    # 검색할지 되물을지가 질문 조건과 프로필의 차이로 정해져 핸들러를 고르기 전에 계산함
+    conditions_started = perf_counter()
+    ctx.conditions = build_conditions(ctx.analysis, inp.profile, await load_regions(ctx), await load_code_names(ctx))
+    latency["conditions"] = _elapsed_ms(conditions_started)
+    ctx.trace["conditions"] = ctx.conditions.to_trace()
+
+    route = choose_route(ctx.analysis, ctx.conditions)
     ctx.answer_kind = route.answer_kind
     ctx.trace["handler"] = route.handler.value
     ctx.trace["answer_kind"] = route.answer_kind.value

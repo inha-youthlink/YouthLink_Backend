@@ -3,6 +3,7 @@ from datetime import date
 from app.core.config import Settings
 from app.core.dependencies import PipelineDeps
 from app.pipeline.analyzer import AnalysisResult, ResolvedSubQuery
+from app.pipeline.conditions import Mismatch, SearchConditions
 from app.pipeline.context import PipelineContext
 from app.pipeline.handlers import clarify, detail, short
 from app.repositories.policy_repository import PolicyRecord
@@ -112,3 +113,35 @@ async def test_clarify_general_reply_without_options():
 
     assert evidence.candidates == []
     assert evidence.reply == clarify.GENERAL_REPLY
+
+
+async def test_clarify_condition_mismatch_without_cards():
+    ctx = _ctx(FakePolicyRepository(RENT), current=[RENT])
+    ctx.conditions = SearchConditions(mismatches=[
+        Mismatch("지역", "인천", "서울특별시"), Mismatch("학력", "석·박사", "대학 졸업"),
+    ])
+
+    evidence = await clarify.collect(ctx)
+
+    # 현재 정책이 있어도 정책 보기가 아니라 조건 차이를 되묻고, 취업 상태·학력은 문구에 넣지 않음
+    assert evidence.candidates == []
+    assert evidence.reply == (
+        "질문에 말씀하신 지역(인천)이 프로필 지역(서울특별시)과 달라요.\n"
+        "- 프로필 기준으로 찾으려면 지역을 빼고 다시 물어봐 주세요.\n"
+        "- 말씀하신 조건으로 찾으려면 프로필을 그 조건으로 정한 새 채팅방에서 물어봐 주세요."
+    )
+    assert ctx.trace["clarify_reason"] == "condition"
+
+
+def test_condition_reply_for_age_and_both():
+    age = Mismatch("나이", "35세", "27세")
+    region = Mismatch("지역", "인천", "서울특별시")
+
+    assert clarify.condition_reply([age]).split("\n")[:2] == [
+        "질문에 말씀하신 나이(35세)가 프로필 나이(27세)와 달라요.",
+        "- 프로필 기준으로 찾으려면 나이를 빼고 다시 물어봐 주세요.",
+    ]
+    assert clarify.condition_reply([region, age]).split("\n")[:2] == [
+        "질문에 말씀하신 지역(인천)과 나이(35세)가 프로필(서울특별시, 27세)과 달라요.",
+        "- 프로필 기준으로 찾으려면 지역과 나이를 빼고 다시 물어봐 주세요.",
+    ]

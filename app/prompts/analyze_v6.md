@@ -14,12 +14,13 @@
   - intent: 질문 유형
   - status_filter: 신청 상태에 대한 요청
   - region, age, job_status, school: 사용자가 자기 상황으로 말한 조건
+  - category: 찾는 지원의 분야
 - is_new_topic: 화제 전환 여부
 
 # 독립 질문 규칙
 - 대화를 보지 않은 사람도 이해할 수 있게 한국어 질문으로 쓴다.
 - "그거", "두 번째 거", "아까 그 정책" 같은 지시어는 가리키는 정책의 전체 이름으로 바꾼다.
-- 사용자가 질문에서 직접 말한 조건(나이, 지역, 취업 상태, 졸업 시기 등)은 빠뜨리지 않고 남긴다.
+- 사용자가 이번 질문에서 직접 말한 조건(나이, 지역, 취업 상태, 졸업 시기 등)은 빠뜨리지 않고 남긴다. [최근 대화]에서만 말한 조건은 독립 질문에 넣지 않는다.
 - 배경 설명, 감정 표현, 인사처럼 무엇을 찾을지와 관계없는 내용은 뺀다.
 - 대화와 질문에 없는 정보(정책 내용, 사용자 조건)는 추가하지 않는다.
 - 이미 독립적인 질문이면 거의 그대로 둔다.
@@ -30,16 +31,28 @@
 - 사용자 조건(지역, 나이, 취업 상태, 학력)과 신청 상태 요청("지금 신청 가능한")은 검색어에 쓰지 않는다. 아래 조건 필드로 따로 출력한다.
 - 정책을 가리키면 정책 이름과 묻는 항목을 쓴다. ("청년 구직 활동비 신청 기간")
 - 정책의 대상 자체가 찾는 주제면 검색어에 남긴다. ("신혼부부 전세 지원", "청년 창업 준비 지원")
+- 분야만 말한 넓은 질문은 그 분야에서 흔한 지원 형태 단어를 2~4개 덧붙인다. 정책은 "건강 지원"보다 "검진비", "의료비"처럼 구체적인 말로 적혀 있어 넓은 말만으로는 찾기 어렵다. ("청년 건강 지원" → "청년 건강 지원 검진비 의료비 운동", "청년 생활비 지원" → "청년 생활비 지원 수당 바우처 식비")
+- 지원 형태가 이미 구체적이거나("월세 지원", "정장 대여") 정책을 가리키면 덧붙이지 않는다.
+- 덧붙이는 단어는 일반적인 말만 쓴다. 정책 이름, 기관 이름, 지역 이름은 지어내지 않는다.
 - chitchat, out_of_scope 질문은 빈 문자열("")로 둔다.
 
 # 사용자 조건 규칙 (region, age, job_status, school)
-- 사용자가 이 질문이나 최근 대화에서 자기 상황으로 직접 말한 조건만 쓴다. 짐작하거나 정책 내용에서 가져오지 않는다.
+- 사용자가 이번 [질문]에서 자기 상황으로 직접 말한 조건만 쓴다. [최근 대화]에서 말한 조건은 이번 질문에서 다시 말하지 않았으면 쓰지 않는다. 짐작하거나 정책 내용에서 가져오지 않는다.
 - 정책의 대상을 말한 것은 사용자 조건이 아니다. "창업 준비하는 사람한테 주는 지원 있어?"는 job_status를 "없음"으로 두고 검색어에 "창업 준비"를 남긴다.
 - 사용자가 자기도 받을 수 있는지 물으며 신분을 말하면 사용자 조건이다. "대학원생도 받을 수 있어?", "직장 다니는데 받을 수 있어?"는 school, job_status에 쓴다.
 - region: 사용자가 말한 지역 이름을 그대로 쓴다. ("서울", "인천 부평구", "강남구"). 없으면 ""
 - age: 만 나이 숫자. "20대"처럼 범위로만 말했으면 null. 없으면 null
 - job_status: 재직자(회사 다님, 직장인), 자영업자(가게·사업 운영), 미취업자(취업 준비, 구직 중, 백수), 프리랜서, 일용근로자, (예비)창업자(창업 준비, 사업 준비), 단기근로자(아르바이트), 영농종사자(농사). 없으면 "없음"
 - school: 고졸 미만, 고교 재학(고등학생), 고졸 예정, 고교 졸업, 대학 재학(대학생), 대졸 예정(졸업 예정 대학생), 대학 졸업, 석·박사(대학원생). 어느 학교를 졸업했는지 알 수 없으면 "없음"
+
+# 분야 규칙 (category)
+- 찾는 지원의 분야를 하나 고른다. 정책 이름을 가리키는 질문도 그 정책의 분야를 고른다.
+  - 일자리: 취업, 구직, 창업, 인턴, 일경험, 면접
+  - 주거: 월세, 전세, 보증금, 임대주택, 이사, 주거비
+  - 교육: 직업훈련, 강좌, 자격증, 장학금, 등록금, 학자금
+  - 복지문화: 생활비, 건강, 심리상담, 교통, 문화, 예술, 저축, 자산 형성
+  - 참여: 청년 활동, 모임, 교류, 해외 봉사, 정책 참여
+- 분야를 정할 수 없거나 chitchat, out_of_scope 질문은 "없음"
 
 # 정책 지목 규칙 (target_refs)
 - [직전에 보여준 정책], [현재 대화 중인 정책]에 적힌 표기("1", "2", "C1")만 쓴다. 정책 이름이나 다른 값은 쓰지 않는다.
@@ -93,8 +106,8 @@
 [현재 대화 중인 정책]
 없음
 
-[질문] 취업 준비하는 청년이 지금 신청할 수 있는 지원 뭐 있어요? 마감된 건 빼고요.
-{"sub_queries": [{"standalone_question": "취업 준비 중인 청년이 지금 신청할 수 있는 지원 정책은 무엇인가요?", "search_query": "청년 취업 준비 지원", "target_refs": [], "intent": "policy_list", "status_filter": "open_only", "region": "", "age": null, "job_status": "미취업자", "school": "없음"}], "is_new_topic": false}
+[질문] 취업 준비하는 청년이 지금 신청할 수 있는 생활비 지원 뭐 있어요? 마감된 건 빼고요.
+{"sub_queries": [{"standalone_question": "취업 준비 중인 청년이 지금 신청할 수 있는 생활비 지원 정책은 무엇인가요?", "search_query": "청년 생활비 지원 수당 바우처 식비", "target_refs": [], "intent": "policy_list", "status_filter": "open_only", "region": "", "age": null, "job_status": "미취업자", "school": "없음", "category": "복지문화"}], "is_new_topic": false}
 
 ## 예시 2: 정책 목록을 보여준 뒤
 입력
@@ -111,13 +124,13 @@
 없음
 
 [질문] 세 번째 거 신청 방법은?
-{"sub_queries": [{"standalone_question": "청년 직무 교육 지원의 신청 방법은 무엇인가요?", "search_query": "청년 직무 교육 지원 신청 방법", "target_refs": ["3"], "intent": "policy_detail", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "청년 직무 교육 지원의 신청 방법은 무엇인가요?", "search_query": "청년 직무 교육 지원 신청 방법", "target_refs": ["3"], "intent": "policy_detail", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "교육"}], "is_new_topic": false}
 
 [질문] 제가 작년 여름에 졸업하고 지금까지 계속 취업 준비만 하고 있는데요, 학원비도 그렇고 면접 보러 다니는 교통비도 그렇고 생각보다 돈이 많이 나가더라고요. 부모님한테 계속 손 벌리기도 눈치 보이고요. 아까 알려주신 것 중에 두 번째 거가 좀 괜찮아 보이던데, 그거 졸업한 지 1년 넘었어도 신청할 수 있는 건가요?
-{"sub_queries": [{"standalone_question": "졸업한 지 1년이 넘은 미취업 청년도 청년 구직 활동비를 신청할 수 있나요?", "search_query": "청년 구직 활동비 신청 자격", "target_refs": ["2"], "intent": "eligibility", "status_filter": "none", "region": "", "age": null, "job_status": "미취업자", "school": "없음"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "졸업한 지 1년이 넘은 미취업 청년도 청년 구직 활동비를 신청할 수 있나요?", "search_query": "청년 구직 활동비 신청 자격", "target_refs": ["2"], "intent": "eligibility", "status_filter": "none", "region": "", "age": null, "job_status": "미취업자", "school": "없음", "category": "일자리"}], "is_new_topic": false}
 
 [질문] 감사해요. 직무 교육 지원은 서류 뭐 내야 돼요? 그리고 창업 준비하는 사람한테 주는 지원도 있어요?
-{"sub_queries": [{"standalone_question": "청년 직무 교육 지원의 제출 서류는 무엇인가요?", "search_query": "청년 직무 교육 지원 제출 서류", "target_refs": ["3"], "intent": "policy_detail", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음"}, {"standalone_question": "창업을 준비하는 청년이 받을 수 있는 지원 정책은 무엇인가요?", "search_query": "청년 창업 준비 지원", "target_refs": [], "intent": "policy_list", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "청년 직무 교육 지원의 제출 서류는 무엇인가요?", "search_query": "청년 직무 교육 지원 제출 서류", "target_refs": ["3"], "intent": "policy_detail", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "교육"}, {"standalone_question": "창업을 준비하는 청년이 받을 수 있는 지원 정책은 무엇인가요?", "search_query": "청년 창업 준비 지원", "target_refs": [], "intent": "policy_list", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "일자리"}], "is_new_topic": false}
 
 ## 예시 3: 정책 하나를 자세히 다룬 뒤
 입력
@@ -132,16 +145,16 @@
 1번과 같음
 
 [질문] 지원 금액은 얼마예요?
-{"sub_queries": [{"standalone_question": "청년 구직 활동비의 지원 금액은 얼마인가요?", "search_query": "청년 구직 활동비 지원 금액", "target_refs": ["1"], "intent": "policy_detail", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "청년 구직 활동비의 지원 금액은 얼마인가요?", "search_query": "청년 구직 활동비 지원 금액", "target_refs": ["1"], "intent": "policy_detail", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "일자리"}], "is_new_topic": false}
 
 [질문] 고마워요! 덕분에 많이 알았어요.
-{"sub_queries": [{"standalone_question": "고마워요", "search_query": "", "target_refs": [], "intent": "chitchat", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "고마워요", "search_query": "", "target_refs": [], "intent": "chitchat", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "없음"}], "is_new_topic": false}
 
 [질문] 강아지 사료 추천해 주세요
-{"sub_queries": [{"standalone_question": "강아지 사료 추천해 주세요", "search_query": "", "target_refs": [], "intent": "out_of_scope", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "강아지 사료 추천해 주세요", "search_query": "", "target_refs": [], "intent": "out_of_scope", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "없음"}], "is_new_topic": false}
 
 [질문] 취업 쪽은 이제 충분한 것 같아요. 혹시 문화생활 할인해 주는 지원도 있나요? 마감된 것도 같이 알려주세요.
-{"sub_queries": [{"standalone_question": "청년 문화생활 할인 지원 정책은 무엇인가요?", "search_query": "청년 문화생활 할인 지원", "target_refs": [], "intent": "policy_list", "status_filter": "include_closed", "region": "", "age": null, "job_status": "없음", "school": "없음"}], "is_new_topic": true}
+{"sub_queries": [{"standalone_question": "청년 문화생활 할인 지원 정책은 무엇인가요?", "search_query": "청년 문화생활 할인 지원", "target_refs": [], "intent": "policy_list", "status_filter": "include_closed", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "복지문화"}], "is_new_topic": true}
 
 ## 예시 4: 현재 정책이 화면에 없을 때
 입력
@@ -161,7 +174,7 @@
 C1. 청년 구직 활동비
 
 [질문] 구직 활동비는 언제까지 신청해야 돼요?
-{"sub_queries": [{"standalone_question": "청년 구직 활동비의 신청 기간은 언제까지인가요?", "search_query": "청년 구직 활동비 신청 기간", "target_refs": ["C1"], "intent": "policy_detail", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "청년 구직 활동비의 신청 기간은 언제까지인가요?", "search_query": "청년 구직 활동비 신청 기간", "target_refs": ["C1"], "intent": "policy_detail", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "일자리"}], "is_new_topic": false}
 
 ## 예시 5: 이름이 비슷한 정책이 있을 때
 입력
@@ -178,10 +191,10 @@ C1. 청년 구직 활동비
 없음
 
 [질문] 교통비 환급 그거 저도 받을 수 있어요?
-{"sub_queries": [{"standalone_question": "청년 교통비 환급을 받을 수 있나요?", "search_query": "청년 교통비 환급 자격", "target_refs": ["1"], "intent": "eligibility", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "청년 교통비 환급을 받을 수 있나요?", "search_query": "청년 교통비 환급 자격", "target_refs": ["1"], "intent": "eligibility", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "복지문화"}], "is_new_topic": false}
 
 [질문] 교통비 그거 신청 기간 언제예요?
-{"sub_queries": [{"standalone_question": "교통비 지원 정책의 신청 기간은 언제인가요?", "search_query": "교통비 지원 신청 기간", "target_refs": [], "intent": "unclear", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "교통비 지원 정책의 신청 기간은 언제인가요?", "search_query": "교통비 지원 신청 기간", "target_refs": [], "intent": "unclear", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "복지문화"}], "is_new_topic": false}
 
 ## 예시 6: 현재 정책이 둘 이상일 때
 입력
@@ -198,13 +211,13 @@ C1. 청년 구직 활동비
 2번과 같음
 
 [질문] 신청 기간은요?
-{"sub_queries": [{"standalone_question": "교통비 지원 정책의 신청 기간은 언제인가요?", "search_query": "교통비 지원 신청 기간", "target_refs": [], "intent": "unclear", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "교통비 지원 정책의 신청 기간은 언제인가요?", "search_query": "교통비 지원 신청 기간", "target_refs": [], "intent": "unclear", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "복지문화"}], "is_new_topic": false}
 
 [질문] 둘 다 신청 기간 알려주세요
-{"sub_queries": [{"standalone_question": "청년 교통비 환급과 청년 통근 교통비 지원의 신청 기간은 언제인가요?", "search_query": "청년 교통비 환급 청년 통근 교통비 지원 신청 기간", "target_refs": ["1", "2"], "intent": "policy_detail", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "청년 교통비 환급과 청년 통근 교통비 지원의 신청 기간은 언제인가요?", "search_query": "청년 교통비 환급 청년 통근 교통비 지원 신청 기간", "target_refs": ["1", "2"], "intent": "policy_detail", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "복지문화"}], "is_new_topic": false}
 
 [질문] 통근 교통비 지원은 언제까지 신청해요?
-{"sub_queries": [{"standalone_question": "청년 통근 교통비 지원의 신청 기간은 언제까지인가요?", "search_query": "청년 통근 교통비 지원 신청 기간", "target_refs": ["2"], "intent": "policy_detail", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "청년 통근 교통비 지원의 신청 기간은 언제까지인가요?", "search_query": "청년 통근 교통비 지원 신청 기간", "target_refs": ["2"], "intent": "policy_detail", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "복지문화"}], "is_new_topic": false}
 
 ## 예시 7: 사용자가 자기 조건을 말할 때
 입력
@@ -215,14 +228,29 @@ C1. 청년 구직 활동비
 [현재 대화 중인 정책]
 없음
 
-[질문] 인천 부평구 사는 32살 대학원생인데요, 지금 신청할 수 있는 주거 지원 있어요?
-{"sub_queries": [{"standalone_question": "인천 부평구에 사는 32세 대학원생이 지금 신청할 수 있는 주거 지원 정책은 무엇인가요?", "search_query": "청년 주거 지원", "target_refs": [], "intent": "policy_list", "status_filter": "open_only", "region": "인천 부평구", "age": 32, "job_status": "없음", "school": "석·박사"}], "is_new_topic": false}
+[질문] 인천 부평구 사는 32살 대학원생인데요, 지금 신청할 수 있는 건강 지원 있어요?
+{"sub_queries": [{"standalone_question": "인천 부평구에 사는 32세 대학원생이 지금 신청할 수 있는 건강 지원 정책은 무엇인가요?", "search_query": "청년 건강 지원 검진비 의료비 운동", "target_refs": [], "intent": "policy_list", "status_filter": "open_only", "region": "인천 부평구", "age": 32, "job_status": "없음", "school": "석·박사", "category": "복지문화"}], "is_new_topic": false}
 
 [질문] 서울에서 회사 다니는데 월세 지원 받을 수 있는 거 있어?
-{"sub_queries": [{"standalone_question": "서울에서 회사에 다니는 청년이 받을 수 있는 월세 지원 정책은 무엇인가요?", "search_query": "청년 월세 지원", "target_refs": [], "intent": "policy_list", "status_filter": "none", "region": "서울", "age": null, "job_status": "재직자", "school": "없음"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "서울에서 회사에 다니는 청년이 받을 수 있는 월세 지원 정책은 무엇인가요?", "search_query": "청년 월세 지원", "target_refs": [], "intent": "policy_list", "status_filter": "none", "region": "서울", "age": null, "job_status": "재직자", "school": "없음", "category": "주거"}], "is_new_topic": false}
 
 [질문] 대학원생도 받을 수 있는 학자금 대출 이자 지원 있어요?
-{"sub_queries": [{"standalone_question": "대학원생이 받을 수 있는 학자금 대출 이자 지원 정책은 무엇인가요?", "search_query": "청년 학자금 대출 이자 지원", "target_refs": [], "intent": "policy_list", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "석·박사"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "대학원생이 받을 수 있는 학자금 대출 이자 지원 정책은 무엇인가요?", "search_query": "청년 학자금 대출 이자 지원", "target_refs": [], "intent": "policy_list", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "석·박사", "category": "교육"}], "is_new_topic": false}
 
 [질문] 신혼부부한테 주는 전세 지원도 있어요?
-{"sub_queries": [{"standalone_question": "신혼부부를 위한 전세 지원 정책은 무엇인가요?", "search_query": "신혼부부 전세 지원", "target_refs": [], "intent": "policy_list", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음"}], "is_new_topic": false}
+{"sub_queries": [{"standalone_question": "신혼부부를 위한 전세 지원 정책은 무엇인가요?", "search_query": "신혼부부 전세 지원", "target_refs": [], "intent": "policy_list", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "주거"}], "is_new_topic": false}
+
+## 예시 8: 지난 질문에서 말한 조건
+입력
+[최근 대화]
+<턴 1>
+질문: 인천 사는 32살인데 창업 지원 뭐 있어요?
+답변: 질문에 말씀하신 지역(인천)과 나이(32세)가 프로필(서울특별시, 27세)과 달라요. - 프로필 기준으로 찾으려면 지역과 나이를 빼고 다시 물어봐 주세요. …
+보여준 정책: 없음
+[직전에 보여준 정책]
+없음
+[현재 대화 중인 정책]
+없음
+
+[질문] 청년 창업 지원 알려줘
+{"sub_queries": [{"standalone_question": "청년 창업 지원 정책은 무엇인가요?", "search_query": "청년 창업 지원", "target_refs": [], "intent": "policy_list", "status_filter": "none", "region": "", "age": null, "job_status": "없음", "school": "없음", "category": "일자리"}], "is_new_topic": false}

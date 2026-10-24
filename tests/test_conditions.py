@@ -1,7 +1,7 @@
 import pytest
 
 from app.pipeline.analyzer import AnalysisResult, FallbackReason, ResolvedSubQuery
-from app.pipeline.conditions import RegionIndex, build_conditions
+from app.pipeline.conditions import Mismatch, RegionIndex, build_conditions
 from app.repositories.policy_repository import PolicyFilter, RegionRow
 from app.schemas.analysis import Intent, JobStatus, SchoolLevel, StatusFilter
 from app.schemas.pipeline import Profile
@@ -59,12 +59,13 @@ def test_profile_conditions_used_when_question_has_none():
         marriage_code="0055002", annual_income_won=30_000_000,
     )
     assert conditions.lines == [
-        "지역: 서울특별시 (프로필)", "나이: 27세 (프로필)", "취업 상태: 미취업자 (프로필)",
-        "학력: 대학 재학 (프로필)", "혼인 상태: 미혼 (프로필)", "연소득: 30,000,000원 (프로필)",
+        "지역: 서울특별시", "나이: 27세", "취업 상태: 미취업자",
+        "학력: 대학 재학", "혼인 상태: 미혼", "연소득: 30,000,000원",
     ]
+    assert conditions.mismatches == []
 
 
-def test_question_conditions_override_profile():
+def test_question_conditions_detected_but_not_used_for_filter():
     sub = _sub(
         region="인천 부평구", age=35, job_status=JobStatus.EMPLOYED, school=SchoolLevel.GRADUATE_SCHOOL,
         status_filter=StatusFilter.OPEN_ONLY,
@@ -72,24 +73,51 @@ def test_question_conditions_override_profile():
 
     conditions = build_conditions(_analysis(sub), PROFILE, REGIONS, CODE_NAMES)
 
-    policy_filter = conditions.to_filter()
-    assert (policy_filter.sido_code, policy_filter.age) == ("28", 35)
-    assert policy_filter.eligibility_codes == {"JOB": "0013001", "SCHOOL": "0049008"}
-    assert policy_filter.exclude_closed and policy_filter.exclude_upcoming
-    assert conditions.lines[:4] == [
-        "지역: 인천광역시 (질문)", "나이: 35세 (질문)", "취업 상태: 재직자 (질문)", "학력: 석·박사 (질문)",
+    # 신청 상태만 질문에서 가져옴
+    assert conditions.to_filter() == PolicyFilter(
+        sido_code="11", age=27, eligibility_codes={"JOB": "0013003", "SCHOOL": "0049005"},
+        marriage_code="0055002", annual_income_won=30_000_000, exclude_closed=True, exclude_upcoming=True,
+    )
+    assert conditions.mismatches == [
+        Mismatch("지역", "인천 부평구", "서울특별시"), Mismatch("나이", "35세", "27세"),
+        Mismatch("취업 상태", "재직자", "미취업자"), Mismatch("학력", "석·박사", "대학 재학"),
+    ]
+    assert [mismatch.name for mismatch in conditions.ask_back] == ["지역", "나이"]
+    assert conditions.lines[-5:] == [
+        "신청 상태: 지금 신청 가능한 정책만",
+        "질문에서 말한 지역: 인천 부평구 (프로필과 달라 프로필 기준으로 찾음)",
+        "질문에서 말한 나이: 35세 (프로필과 달라 프로필 기준으로 찾음)",
+        "질문에서 말한 취업 상태: 재직자 (프로필과 달라 프로필 기준으로 찾음)",
+        "질문에서 말한 학력: 석·박사 (프로필과 달라 프로필 기준으로 찾음)",
     ]
 
 
-def test_unresolved_question_region_does_not_fall_back_to_profile():
-    conditions = build_conditions(_analysis(_sub(region="판교")), PROFILE, REGIONS, CODE_NAMES)
+@pytest.mark.parametrize(
+    "sub",
+    [
+        # 같은 시도의 구, 시도로 바꿀 수 없는 지역, 여러 시도에 있는 구 이름
+        _sub(region="강남구"), _sub(region="서울"), _sub(region="판교"), _sub(region="중구"),
+        _sub(age=27), _sub(job_status=JobStatus.UNEMPLOYED), _sub(school=SchoolLevel.COLLEGE_ENROLLED),
+    ],
+)
+def test_same_or_unresolved_condition_is_not_mismatch(sub):
+    conditions = build_conditions(_analysis(sub), PROFILE, REGIONS, CODE_NAMES)
 
-    assert conditions.to_filter().sido_code is None
-    assert "지역: 판교 (질문, 지역 코드로 바꿀 수 없어 거르지 않음)" in conditions.lines
+    assert conditions.mismatches == []
+    assert conditions.to_filter().sido_code == "11"
 
 
-def test_no_conditions_when_analysis_failed():
+def test_mismatch_in_any_sub_query():
+    conditions = build_conditions(_analysis(_sub(), _sub(region="인천")), PROFILE, REGIONS, CODE_NAMES)
+
+    assert conditions.ask_back == [Mismatch("지역", "인천", "서울특별시")]
+
+
+def test_profile_conditions_used_when_analysis_failed():
     conditions = build_conditions(_analysis(failed=True), PROFILE, REGIONS, CODE_NAMES)
 
-    assert conditions.to_filter().is_empty()
-    assert conditions.lines == []
+    assert conditions.to_filter() == PolicyFilter(
+        sido_code="11", age=27, eligibility_codes={"JOB": "0013003", "SCHOOL": "0049005"},
+        marriage_code="0055002", annual_income_won=30_000_000,
+    )
+    assert conditions.mismatches == []

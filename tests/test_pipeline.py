@@ -6,7 +6,7 @@ from app.llm.client import ChatResult, ParsedResult
 from app.pipeline.runner import run_pipeline
 from app.repositories.policy_repository import PolicyRecord, RegionRow
 from app.schemas.analysis import Category, Intent, JobStatus, QueryAnalysis, SchoolLevel, StatusFilter, SubQuery
-from app.schemas.pipeline import Chunk, ConversationTurn, PipelineInput, PolicyRef
+from app.schemas.pipeline import Chunk, ConversationTurn, PipelineInput, PolicyRef, Profile
 
 RENT = PolicyRef(policy_no="P-RENT", policy_name="청년 월세 지원")
 MOVE = PolicyRef(policy_no="P-MOVE", policy_name="청년 이사비 지원")
@@ -17,10 +17,10 @@ class FakeLLM:
     embedding_model = "fake-embedding-model"
     analysis_model = "fake-analysis-model"
 
-    def __init__(self, intent: Intent, refs: list[str], answer: str) -> None:
+    def __init__(self, intent: Intent, refs: list[str], answer: str, region: str = "") -> None:
         self._sub = SubQuery(
             standalone_question="질문", search_query="청년 주거 지원", target_refs=refs, intent=intent,
-            status_filter=StatusFilter.NONE, region="", age=None, job_status=JobStatus.NONE, school=SchoolLevel.NONE,
+            status_filter=StatusFilter.NONE, region=region, age=None, job_status=JobStatus.NONE, school=SchoolLevel.NONE,
             category=Category.NONE,
         )
         self._answer = answer
@@ -48,7 +48,7 @@ class FakeRetriever:
 
 class FakePolicyRepository:
     async def list_regions(self):
-        return [RegionRow("11", "서울특별시", "강남구")]
+        return [RegionRow("11", "서울특별시", "강남구"), RegionRow("28", "인천광역시", "부평구")]
 
     async def get_by_ids(self, policy_nos):
         return {
@@ -94,7 +94,7 @@ async def test_list_question_searches_and_llm_picks_cards():
     assert [policy.policy_no for policy in output.policies] == ["P-MOVE"]
     assert output.answer == "1. 청년 이사비 지원"
     assert (output.trace["handler"], output.trace["answer_kind"]) == ("search", "recommend")
-    assert output.trace["prompt_version"] == "answer_common_v1+answer_cards_v1+answer_recommend_v1"
+    assert output.trace["prompt_version"] == "answer_common_v2+answer_cards_v2+answer_recommend_v1"
     assert output.trace["cards"] == {"candidate_nos": ["P-RENT", "P-MOVE"], "selected": [2], "fallback": False}
     assert output.trace["conditions"]["filtered_policy_count"] is None
 
@@ -119,9 +119,9 @@ async def test_targeted_detail_uses_target_without_search():
     assert output.policies[0].region_label == "서울특별시"
     assert output.answer == "청년 이사비 지원은 상시 신청할 수 있어요."
     assert (output.trace["handler"], output.trace["answer_kind"]) == ("detail", "detail")
-    assert output.trace["prompt_version"] == "answer_common_v1+answer_detail_v1"
+    assert output.trace["prompt_version"] == "answer_common_v2+answer_detail_v1"
     assert output.current_policies == [MOVE]
-    assert "conditions" not in output.trace
+    assert "filtered_policy_count" not in output.trace["conditions"]
 
 
 async def test_chitchat_answers_without_evidence():
@@ -150,3 +150,35 @@ async def test_missing_card_number_clarifies_without_llm_answer():
     assert output.trace["prompt_version"] is None
     assert output.trace["tokens"] == {"prompt": 0, "completion": 0}
     assert set(output.trace["latency_ms"]) >= {"analyze", "generate", "total"}
+
+
+SEOUL = Profile(age=27, region_code="11680")
+
+
+async def test_question_region_different_from_profile_clarifies():
+    llm = FakeLLM(Intent.POLICY_LIST, [], "호출되면 안 됨", region="인천")
+    deps = _deps(llm)
+
+    output = await run_pipeline(PipelineInput(question="인천 창업 지원 알려줘", profile=SEOUL, history=SHOWN), deps)
+
+    assert llm.chat_calls == 0
+    assert deps.retriever.calls == 0
+    assert output.policies == []
+    assert output.answer.startswith("질문에 말씀하신 지역(인천)이 프로필 지역(서울특별시)과 달라요.")
+    assert (output.trace["handler"], output.trace["clarify_reason"]) == ("clarify", "condition")
+    assert output.trace["conditions"]["mismatches"] == [
+        {"name": "지역", "question": "인천", "profile": "서울특별시", "asks_back": True}
+    ]
+
+
+async def test_question_region_mismatch_on_targeted_policy_answers():
+    llm = FakeLLM(Intent.ELIGIBILITY, ["2"], "인천 거주자는 조건이 달라요.", region="인천")
+    deps = _deps(llm)
+
+    output = await run_pipeline(
+        PipelineInput(question="두 번째 거 인천 사람도 받을 수 있어?", profile=SEOUL, history=SHOWN), deps
+    )
+
+    assert llm.chat_calls == 1
+    assert output.trace["handler"] == "detail"
+    assert [policy.policy_no for policy in output.policies] == ["P-MOVE"]

@@ -1,6 +1,7 @@
 import pytest
 
 from app.pipeline.analyzer import AnalysisResult, FallbackReason, ResolvedSubQuery
+from app.pipeline.conditions import Mismatch, SearchConditions
 from app.pipeline.evidence import AnswerKind
 from app.pipeline.router import Handler, Route, choose_route
 from app.schemas.analysis import Intent, StatusFilter
@@ -53,4 +54,29 @@ CLARIFY = Route(Handler.CLARIFY, AnswerKind.CLARIFY)
     ],
 )
 def test_choose_route(analysis, route):
-    assert choose_route(analysis) == route
+    assert choose_route(analysis, SearchConditions()) == route
+
+
+REGION_MISMATCH = SearchConditions(mismatches=[Mismatch("지역", "인천", "서울특별시")])
+
+
+@pytest.mark.parametrize(
+    ("analysis", "route"),
+    [
+        (_analysis(_sub(Intent.POLICY_LIST)), CLARIFY),
+        # 처음 묻는 정책 이름도 프로필 지역으로 거르면 찾지 못해 되물음
+        (_analysis(_sub(Intent.POLICY_DETAIL)), CLARIFY),
+        (_analysis(_sub(Intent.POLICY_LIST), _sub(Intent.POLICY_LIST)), CLARIFY),
+        # 지목한 정책은 거르지 않아 답변에서 설명함
+        (_analysis(_sub(Intent.ELIGIBILITY, [RENT])), DETAIL),
+        (_analysis(_sub(Intent.CHITCHAT)), SHORT),
+    ],
+)
+def test_region_or_age_mismatch_clarifies_only_search(analysis, route):
+    assert choose_route(analysis, REGION_MISMATCH) == route
+
+
+def test_job_or_school_mismatch_still_searches():
+    conditions = SearchConditions(mismatches=[Mismatch("학력", "석·박사", "대학 졸업")])
+
+    assert choose_route(_analysis(_sub(Intent.POLICY_LIST)), conditions) == SEARCH_RECOMMEND
