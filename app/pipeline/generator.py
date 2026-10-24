@@ -11,9 +11,9 @@ from app.pipeline.prompts import load_prompt
 from app.repositories.policy_repository import PolicyRecord
 from app.schemas.policy_info import ApplicationStatus, clean_url
 
-COMMON_PROMPT = "answer_common_v1"
+COMMON_PROMPT = "answer_common_v2"
 # 카드를 LLM이 고를 때만 첫 줄 [소개: …] 형식을 붙임
-CARDS_PROMPT = "answer_cards_v1"
+CARDS_PROMPT = "answer_cards_v2"
 KIND_PROMPTS = {
     AnswerKind.RECOMMEND: "answer_recommend_v1",
     AnswerKind.DETAIL: "answer_detail_v1",
@@ -108,7 +108,7 @@ async def _user_message(ctx: PipelineContext, contexts: list[str]) -> str:
         f"[사용자 프로필]\n{await _format_profile(ctx)}",
     ]
     # 근거가 조건으로 걸러졌음을 알아야 프로필과 다른 조건을 안내하고, 결과가 없을 때 이유를 말할 수 있음
-    if ctx.conditions and ctx.conditions.lines:
+    if ctx.evidence.filtered and ctx.conditions and ctx.conditions.lines:
         sections.append("[검색 조건]\n" + "\n".join(ctx.conditions.lines))
     evidence = "\n\n".join(contexts) if contexts else NO_EVIDENCE
     sections += [f"[근거]\n{evidence}", f"[질문]\n{ctx.query}"]

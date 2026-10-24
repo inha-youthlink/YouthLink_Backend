@@ -4,6 +4,7 @@ from datetime import date
 from app.core.config import Settings
 from app.core.dependencies import PipelineDeps
 from app.pipeline.analyzer import AnalysisResult, ResolvedSubQuery
+from app.pipeline.conditions import RegionIndex, build_conditions
 from app.pipeline.context import PipelineContext
 from app.pipeline.handlers import search
 from app.repositories.policy_repository import PolicyFilter, PolicyRecord, RegionRow
@@ -42,13 +43,13 @@ class FakeRetriever:
         return [_chunk("P-A", 0.9), _chunk("P-CLOSED", 0.71), _chunk("P-B", 0.7), _chunk("P-C", 0.69)]
 
 
+REGIONS = RegionIndex([RegionRow("11", "서울특별시", "강남구"), RegionRow("28", "인천광역시", "부평구")])
+
+
 class FakePolicyRepository:
     def __init__(self) -> None:
         self.document_requests: list[list[str]] = []
         self.filters: list[PolicyFilter] = []
-
-    async def list_regions(self):
-        return [RegionRow("11", "서울특별시", "강남구"), RegionRow("28", "인천광역시", "부평구")]
 
     async def filter_policy_nos(self, policy_filter, today):
         self.filters.append(policy_filter)
@@ -87,13 +88,16 @@ def _ctx(
         common_code_repository=FakeCommonCodes(),
     )
     question = "주거 지원 알려줘"
+    profile = profile or Profile()
+    # 조건은 runner가 핸들러 전에 계산함
     return PipelineContext(
-        input=PipelineInput(question=question, profile=profile or Profile()),
+        input=PipelineInput(question=question, profile=profile),
         deps=deps,
         query=question,
         search_query="청년 주거 지원",
         today=date(2026, 10, 23),
         analysis=analysis,
+        conditions=build_conditions(analysis, profile, REGIONS, {}),
     )
 
 
@@ -121,35 +125,32 @@ async def test_candidates_use_status_penalty():
     assert evidence.fixed_cards is False
 
 
-async def test_question_region_filters_and_search_query_used():
+async def test_profile_conditions_filter_and_search_query_used():
     repository = FakePolicyRepository()
     ctx = _ctx(
         repository,
-        analysis=_analysis(region="인천", status_filter=StatusFilter.OPEN_ONLY),
-        profile=Profile(age=27, region_code="11680"),
+        analysis=_analysis(status_filter=StatusFilter.OPEN_ONLY),
+        profile=Profile(age=27, region_code="28237"),
     )
 
     evidence = await search.collect(ctx)
 
-    # 질문 지역이 프로필 지역보다 우선하고, 나이는 프로필 값을 씀
     assert repository.filters == [
         PolicyFilter(sido_code="28", age=27, exclude_closed=True, exclude_upcoming=True)
     ]
     assert ctx.deps.retriever.calls == [("청년 주거 지원", ["P-A", "P-B", "P-C", "P-CLOSED"])]
-    # 질문 지역(인천) 정책이 카드 앞으로 옴
+    # 프로필 지역(인천) 정책이 카드 앞으로 옴
     assert [group.policy_no for group in evidence.candidates] == ["P-C", "P-A", "P-B"]
-    assert ctx.trace["conditions"] == {
-        "lines": ["지역: 인천광역시 (질문)", "나이: 27세 (프로필)", "신청 상태: 지금 신청 가능한 정책만 (질문)"],
-        "filtered_policy_count": 4,
-    }
+    assert evidence.filtered is True
+    assert ctx.trace["conditions"] == {"filtered_policy_count": 4}
 
 
-async def test_no_filter_when_analysis_missing():
+async def test_no_filter_without_profile():
     repository = FakePolicyRepository()
-    ctx = _ctx(repository, profile=Profile(age=27, region_code="11680"))
+    ctx = _ctx(repository)
 
     await search.collect(ctx)
 
     assert repository.filters == []
     assert ctx.deps.retriever.calls == [("청년 주거 지원", None)]
-    assert ctx.trace["conditions"] == {"lines": [], "filtered_policy_count": None}
+    assert ctx.trace["conditions"] == {"filtered_policy_count": None}

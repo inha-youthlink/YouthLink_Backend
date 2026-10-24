@@ -24,5 +24,7 @@ class Evidence:
     region_labels: dict[str, str] = field(default_factory=dict)
     # 지목한 정책처럼 카드가 미리 정해지면 LLM에 고르게 하지 않음
     fixed_cards: bool = False
+    # 1차 필터로 걸러진 근거. 답변이 거른 조건과 프로필과 다른 질문 조건을 알려야 함
+    filtered: bool = False
     # 되묻기처럼 LLM 없이 정해지는 답변
     reply: str | None = None

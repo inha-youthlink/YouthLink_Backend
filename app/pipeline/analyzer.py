@@ -13,7 +13,7 @@ from app.schemas.pipeline import ConversationTurn, PipelineInput, PolicyRef
 
 logger = logging.getLogger(__name__)
 
-PROMPT_NAME = "analyze_v5"
+PROMPT_NAME = "analyze_v6"
 # 프롬프트 규칙("최대 3개")과 함께 바뀌어야 해서 설정값이 아닌 상수로 둠
 MAX_SUB_QUERIES = 3
 NONE_TEXT = "없음"
