@@ -80,6 +80,7 @@ async def _create_database(url: str) -> None:
     try:
         await conn.execute((SQL_DIR / "extensions.sql").read_text(encoding="utf-8"))
         await conn.execute((SQL_DIR / "schema.sql").read_text(encoding="utf-8"))
+        await conn.execute((SQL_DIR / "region.sql").read_text(encoding="utf-8"))
         await conn.executemany(
             "INSERT INTO policy (policy_no, policy_name) VALUES ($1, $2)",
             [(policy_no, f"테스트 정책 {policy_no[-2:]}") for policy_no in TEST_POLICY_NOS],
