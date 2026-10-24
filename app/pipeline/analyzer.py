@@ -8,12 +8,12 @@ from pydantic import ValidationError
 
 from app.pipeline.context import PipelineContext
 from app.pipeline.prompts import load_prompt
-from app.schemas.analysis import Intent, JobStatus, QueryAnalysis, SchoolLevel, StatusFilter, SubQuery
+from app.schemas.analysis import Category, Intent, JobStatus, QueryAnalysis, SchoolLevel, StatusFilter, SubQuery
 from app.schemas.pipeline import ConversationTurn, PipelineInput, PolicyRef
 
 logger = logging.getLogger(__name__)
 
-PROMPT_NAME = "analyze_v4"
+PROMPT_NAME = "analyze_v5"
 # 프롬프트 규칙("최대 3개")과 함께 바뀌어야 해서 설정값이 아닌 상수로 둠
 MAX_SUB_QUERIES = 3
 NONE_TEXT = "없음"
@@ -38,6 +38,7 @@ class ResolvedSubQuery:
     age: int | None = None
     job_status: JobStatus = JobStatus.NONE
     school: SchoolLevel = SchoolLevel.NONE
+    category: Category = Category.NONE
     # 후보에 없는 표기. 없는 카드 번호를 가리킨 경우라 라우터가 되묻기로 보냄
     unresolved_refs: list[str] = field(default_factory=list)
 
@@ -73,6 +74,7 @@ class AnalysisResult:
                     "age": sub.age,
                     "job_status": sub.job_status.value,
                     "school": sub.school.value,
+                    "category": sub.category.value,
                 }
                 for sub in self.sub_queries
             ],
@@ -161,6 +163,7 @@ def _resolve(sub: SubQuery, labels: dict[str, PolicyRef]) -> ResolvedSubQuery:
         age=sub.age if sub.age is not None and 0 < sub.age < 100 else None,
         job_status=sub.job_status,
         school=sub.school,
+        category=sub.category,
         unresolved_refs=[ref for ref in refs if ref not in labels],
     )
 

@@ -2,6 +2,7 @@ from datetime import date
 
 from app.pipeline.grouping import PolicyGroup
 from app.repositories.policy_repository import PolicyRecord
+from app.schemas.analysis import Category
 from app.schemas.pipeline import PolicyItem
 from app.schemas.policy_info import ApplicationStatus, application_status
 
@@ -15,14 +16,32 @@ STATUS_PENALTY = {
     ApplicationStatus.CLOSED: 0.05,
 }
 
+# 넓은 질문에서 같은 분야 정책을 조금 앞세움. 거르지 않아 분야가 엇갈리게 분류된 정책도 남음 (평가 세트로 정한 임시 값)
+CATEGORY_BONUS = 0.04
+# 정책 대분류에 옛 분류와 새 분류가 섞여 있어 둘 다 맞춤
+CATEGORY_NAMES = {
+    Category.JOB: frozenset({"일자리"}),
+    Category.HOUSING: frozenset({"주거"}),
+    Category.EDUCATION: frozenset({"교육･직업훈련", "교육"}),
+    Category.WELFARE_CULTURE: frozenset({"금융･복지･문화", "복지문화"}),
+    Category.PARTICIPATION: frozenset({"참여･기반", "참여권리"}),
+}
+
 
 def pick_candidates(
-    groups: list[PolicyGroup], policies: dict[str, PolicyRecord], today: date, limit: int
+    groups: list[PolicyGroup],
+    policies: dict[str, PolicyRecord],
+    today: date,
+    limit: int,
+    categories: frozenset[Category] = frozenset(),
 ) -> list[PolicyGroup]:
     known = [group for group in groups if group.policy_no in policies]
+    wanted = frozenset().union(*(CATEGORY_NAMES.get(category, frozenset()) for category in categories))
 
     def adjusted(group: PolicyGroup) -> float:
-        return group.score - STATUS_PENALTY[status_of(policies[group.policy_no], today)]
+        policy = policies[group.policy_no]
+        bonus = CATEGORY_BONUS if wanted & set(policy.large_categories) else 0.0
+        return group.score - STATUS_PENALTY[status_of(policy, today)] + bonus
 
     # 같은 이름은 연도·지역별 공고라 후보 칸을 나눠 쓰지 않도록 앞선 하나만 남김
     candidates: list[PolicyGroup] = []

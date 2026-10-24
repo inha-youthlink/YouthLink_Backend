@@ -32,6 +32,16 @@ class JobStatus(StrEnum):
     FARMER = "영농종사자"
 
 
+# 정책 대분류(large_categories)의 옛 분류와 새 분류를 하나로 묶은 이름
+class Category(StrEnum):
+    NONE = "없음"
+    JOB = "일자리"
+    HOUSING = "주거"
+    EDUCATION = "교육"
+    WELFARE_CULTURE = "복지문화"
+    PARTICIPATION = "참여"
+
+
 class SchoolLevel(StrEnum):
     NONE = "없음"
     BELOW_HIGH_SCHOOL = "고졸 미만"
@@ -59,6 +69,7 @@ class SubQuery(BaseModel):
     age: int | None
     job_status: JobStatus
     school: SchoolLevel
+    category: Category
 
 
 class QueryAnalysis(BaseModel):

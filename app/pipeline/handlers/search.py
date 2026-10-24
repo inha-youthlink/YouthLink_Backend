@@ -31,7 +31,8 @@ async def collect(ctx: PipelineContext) -> Evidence:
     # 상태 감점에는 검색된 정책 전체의 신청 기간이, 근거에는 후보의 청크 전체가 필요해 두 번 조회함
     started = perf_counter()
     policies = await deps.policy_repository.get_by_ids([g.policy_no for g in groups])
-    candidates = pick_candidates(groups, policies, ctx.today, deps.settings.card_candidates)
+    categories = frozenset(sub.category for sub in ctx.analysis.sub_queries) if ctx.analysis else frozenset()
+    candidates = pick_candidates(groups, policies, ctx.today, deps.settings.card_candidates, categories)
     candidate_nos = [g.policy_no for g in candidates]
     documents = await deps.policy_repository.get_documents(candidate_nos)
     region_labels = await deps.policy_repository.get_region_labels(candidate_nos)

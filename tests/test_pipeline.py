@@ -5,7 +5,7 @@ from app.core.dependencies import PipelineDeps
 from app.llm.client import ChatResult, ParsedResult
 from app.pipeline.runner import run_pipeline
 from app.repositories.policy_repository import PolicyRecord, RegionRow
-from app.schemas.analysis import Intent, JobStatus, QueryAnalysis, SchoolLevel, StatusFilter, SubQuery
+from app.schemas.analysis import Category, Intent, JobStatus, QueryAnalysis, SchoolLevel, StatusFilter, SubQuery
 from app.schemas.pipeline import Chunk, ConversationTurn, PipelineInput, PolicyRef
 
 RENT = PolicyRef(policy_no="P-RENT", policy_name="청년 월세 지원")
@@ -21,6 +21,7 @@ class FakeLLM:
         self._sub = SubQuery(
             standalone_question="질문", search_query="청년 주거 지원", target_refs=refs, intent=intent,
             status_filter=StatusFilter.NONE, region="", age=None, job_status=JobStatus.NONE, school=SchoolLevel.NONE,
+            category=Category.NONE,
         )
         self._answer = answer
         self.chat_calls = 0
