@@ -46,6 +46,9 @@ class VectorRepository:
             bindparam("query_vec", type_=Vector(EMBEDDING_DIM)),
         )
 
-        async with self._session_factory() as session:
+        async with self._session_factory() as session, session.begin():
+            # 필터를 HNSW 탐색 뒤에 적용하면 k개보다 적게 나올 수 있어 반복 탐색으로 k개를 채움
+            if policy_ids is not None:
+                await session.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
             result = await session.execute(stmt, params)
             return [Chunk.model_validate(row) for row in result.mappings()]

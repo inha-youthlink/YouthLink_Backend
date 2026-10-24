@@ -55,17 +55,20 @@ class CardLine:
     body: str
 
 
-async def generate(ctx: PipelineContext, prompt_name: str = "generate_v3") -> GenerationResult:
+async def generate(ctx: PipelineContext, prompt_name: str = "generate_v4") -> GenerationResult:
     system_prompt = (PROMPTS_DIR / f"{prompt_name}.md").read_text(encoding="utf-8")
     profile_text = await _format_profile(ctx)
     contexts = _format_evidence(ctx.candidates, ctx.policies, ctx.documents, ctx.today)
     evidence = "\n\n".join(contexts) if contexts else NO_EVIDENCE
-    user_message = "\n\n".join([
+    sections = [
         f"[오늘 날짜]\n{ctx.today.isoformat()}",
         f"[사용자 프로필]\n{profile_text}",
-        f"[근거]\n{evidence}",
-        f"[질문]\n{ctx.query}",
-    ])
+    ]
+    # 근거가 조건으로 걸러졌음을 알아야 프로필과 다른 조건을 안내하고, 결과가 없을 때 이유를 말할 수 있음
+    if ctx.conditions and ctx.conditions.lines:
+        sections.append("[검색 조건]\n" + "\n".join(ctx.conditions.lines))
+    sections += [f"[근거]\n{evidence}", f"[질문]\n{ctx.query}"]
+    user_message = "\n\n".join(sections)
 
     result = await ctx.deps.llm.chat([
         {"role": "system", "content": system_prompt},
@@ -98,6 +101,9 @@ async def _format_profile(ctx: PipelineContext) -> str:
     code_names = await ctx.deps.common_code_repository.get_names(codes)
 
     lines = []
+    region_name = ctx.regions.sido_names.get(profile.region_code[:2]) if ctx.regions and profile.region_code else None
+    if region_name:
+        lines.append(f"지역: {region_name}")
     if profile.age is not None:
         lines.append(f"나이: {profile.age}세")
     if profile.gender:
