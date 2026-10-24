@@ -89,6 +89,12 @@ uv run pytest
 
 - `profile`은 생략할 수 있고, 각 항목도 모두 선택입니다.
 - 응답은 `answer`(답변), `policies`(카드로 보여 줄 정책, 답변 본문과 같은 순서), `trace`(실행 정보)로 구성됩니다.
+- 질문 분석 결과에 따라 처리 방식(핸들러)이 달라집니다 ([설계 문서](docs/design.md) 9절).
+  - 검색: 정책 찾기·추천, 처음 묻는 정책 이름. 1차 필터 → 검색 → LLM이 카드를 고름
+  - 상세: 카드 번호나 "그거"로 가리킨 정책. 검색 없이 그 정책만 근거로 쓰고, 카드도 그 정책
+  - 짧은 답변: 인사, 사용법, 범위 밖. 검색·근거 없음, 카드 없음
+  - 되묻기: 애매한 질문, 없는 카드 번호. LLM 없이 고정 문구. 보기로 든 정책이 답변 번호 순서대로 카드에 들어감
+  - 상세·되묻기 카드는 검색하지 않아 `score`가 0입니다
 - `policies`의 각 카드: `policy_no`, `policy_name`, `application_start_date`, `application_end_date`, `application_url`, `score`, `application_status`, `supervising_org_name`, `region_label`
   - `application_status`: 서버가 계산한 신청 상태 `OPEN`(신청 가능) / `ALWAYS_OPEN`(상시 모집) / `UPCOMING`(신청 예정) / `CLOSED`(마감) / `UNKNOWN`(기간 정보 없음). 마감 코드 정책은 기간이 남아 있어도 `CLOSED`라, 날짜는 `OPEN`·`UPCOMING`일 때만 표시하는 것을 권장합니다
   - `region_label`: 정책 지역 표시 문구 ("서울특별시 강남구", "경기도 5곳", "전국")
@@ -102,12 +108,14 @@ RAG 평가·디버깅용입니다. 근거 원문 같은 내부 정보는 debug �
 
 | 요청 | `trace`에 포함되는 키 |
 |---|---|
-| `POST /internal/pipeline` (기본) | `latency_ms`, `tokens`, `chat_model`, `retriever`, `top_k`, `prompt_version`, `embedding_model`, `handler`, `analysis`, `current_policy_nos`, `cards`, `conditions` |
+| `POST /internal/pipeline` (기본) | `latency_ms`, `tokens`, `chat_model`, `retriever`, `top_k`, `prompt_version`, `embedding_model`, `handler`, `answer_kind`, `analysis`, `current_policy_nos`, `cards`, `conditions` |
 | `POST /internal/pipeline?debug=true` | 위 키 + `contexts`, `retrieved_chunks` |
 
 - `contexts`: LLM에 넘긴 후보 정책별 근거 블록 (`list[str]`, 최대 `CARD_CANDIDATES`개). 신청 상태·링크와 그 정책의 청크 전체가 들어 있습니다. 검색된 정책이 없으면 `[]`
+- `handler`: `search` / `detail` / `short` / `clarify`. `answer_kind`: 답변 조각 `recommend` / `detail` / `short` / `clarify`
+- `prompt_version`: 조립한 프롬프트 조각 이름을 `+`로 이은 값 (예: `answer_common_v1+answer_cards_v1+answer_recommend_v1`). 되묻기는 LLM을 부르지 않아 `null`, `tokens`도 0
 - `cards`: 카드 결정 결과. `candidate_nos`(근거 순서의 후보 정책), `selected`(LLM이 고른 근거 번호, 1부터), `fallback`(답변 첫 줄 형식이 없어 후보 전체를 카드로 보인 경우 `true`)
-- `conditions`: 1차 필터 조건(`lines`, 항목마다 질문·프로필 출처), 필터 후 정책 수(`filtered_policy_count`, 조건이 없으면 `null`), 지역·전국 분리 검색 여부(`split_search`)
+- `conditions`, `retrieved_chunks`: 검색 핸들러일 때만 있습니다. `conditions`는 1차 필터 조건(`lines`, 항목마다 질문·프로필 출처), 필터 후 정책 수(`filtered_policy_count`, 조건이 없으면 `null`), 지역·전국 분리 검색 여부(`split_search`)
 - `retrieved_chunks`: 검색된 청크 목록 (`chunk_id`, `policy_no`, `chunk_type`, `chunk_index`, `score`, `content`), 검색 점수순
 
 ### 채팅 API (`/api/rooms`)
