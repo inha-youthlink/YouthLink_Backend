@@ -1,9 +1,9 @@
 from datetime import date
 
-from app.pipeline.cards import build_cards, pick_candidates, pick_split_candidates
-from app.schemas.policy_info import ALWAYS_OPEN_CODE, CLOSED_CODE, ApplicationStatus
+from app.pipeline.cards import build_cards, local_first, pick_candidates
 from app.pipeline.grouping import PolicyGroup
 from app.repositories.policy_repository import PolicyRecord
+from app.schemas.policy_info import ALWAYS_OPEN_CODE, CLOSED_CODE, ApplicationStatus
 
 TODAY = date(2026, 10, 23)
 
@@ -40,39 +40,37 @@ POLICIES = {
 }
 
 
-def test_candidates_sorted_by_status_then_score():
-    groups = _groups("CLOSED", "UNKNOWN", "UPCOMING", "OPEN", "ALWAYS", "ENDED")
+def test_similar_scores_follow_status():
+    # 점수 차가 감점보다 작으면 신청 가능·상시가 앞서고, 예정·정보 없음이 마감보다 앞섬. 기간이 지난 정책은 마감으로 봄
+    groups = [
+        PolicyGroup("CLOSED", 0.50, []), PolicyGroup("UNKNOWN", 0.50, []), PolicyGroup("UPCOMING", 0.49, []),
+        PolicyGroup("OPEN", 0.49, []), PolicyGroup("ALWAYS", 0.48, []), PolicyGroup("ENDED", 0.48, []),
+    ]
 
     candidates = pick_candidates(groups, POLICIES, TODAY, limit=10)
 
-    # 신청 가능과 상시는 같은 순위라 점수 순서(OPEN이 먼저)를 유지함. 기간이 지난 정책은 마감으로 봄
-    assert [c.policy_no for c in candidates] == ["OPEN", "ALWAYS", "UPCOMING", "UNKNOWN", "CLOSED", "ENDED"]
+    assert [c.policy_no for c in candidates] == ["OPEN", "ALWAYS", "UNKNOWN", "UPCOMING", "CLOSED", "ENDED"]
 
 
-def test_candidates_limited_after_sorting():
-    groups = _groups("UNKNOWN", "CLOSED", "OPEN")
+def test_much_more_relevant_closed_policy_stays_first():
+    # 이름을 직접 물은 마감 정책처럼 점수 차가 감점보다 크면 상태와 관계없이 앞섬
+    groups = [PolicyGroup("CLOSED", 0.79, []), PolicyGroup("OPEN", 0.63, []), PolicyGroup("ALWAYS", 0.62, [])]
+
+    candidates = pick_candidates(groups, POLICIES, TODAY, limit=2)
+
+    assert [c.policy_no for c in candidates] == ["CLOSED", "OPEN"]
+
+
+def test_candidates_limited_after_penalty():
+    groups = [PolicyGroup("CLOSED", 0.60, []), PolicyGroup("UNKNOWN", 0.59, []), PolicyGroup("OPEN", 0.57, [])]
 
     candidates = pick_candidates(groups, POLICIES, TODAY, limit=2)
 
     assert [c.policy_no for c in candidates] == ["OPEN", "UNKNOWN"]
 
 
-def test_candidates_keep_clear_top_regardless_of_status():
-    # 마감 정책이 2위보다 확실히 높은 1위면 상태 정렬로 밀려도 후보에 남고, 순서는 상태 순
-    groups = [
-        PolicyGroup("CLOSED", 0.79, []),
-        PolicyGroup("OPEN", 0.63, []),
-        PolicyGroup("ALWAYS", 0.62, []),
-        PolicyGroup("UNKNOWN", 0.61, []),
-    ]
-
-    candidates = pick_candidates(groups, POLICIES, TODAY, limit=2)
-
-    assert [c.policy_no for c in candidates] == ["OPEN", "CLOSED"]
-
-
-def test_clear_top_counts_same_name_policies_together():
-    # 같은 이름의 두 공고(마감, 예정)가 1·2위면 한 묶음으로 보고 다음 정책과 비교하며, 상태가 앞선 예정 공고만 남김
+def test_same_name_keeps_higher_adjusted_one():
+    # 같은 이름의 두 공고(마감, 예정) 중 감점 뒤 점수가 높은 예정 공고만 남김
     policies = {
         **POLICIES,
         "NEXT-YEAR": PolicyRecord(
@@ -82,28 +80,12 @@ def test_clear_top_counts_same_name_policies_together():
         ),
     }
     groups = [
-        PolicyGroup("CLOSED", 0.689, []),
-        PolicyGroup("NEXT-YEAR", 0.666, []),
-        PolicyGroup("OPEN", 0.630, []),
-        PolicyGroup("ALWAYS", 0.618, []),
+        PolicyGroup("CLOSED", 0.689, []), PolicyGroup("NEXT-YEAR", 0.680, []), PolicyGroup("OPEN", 0.630, []),
     ]
 
     candidates = pick_candidates(groups, policies, TODAY, limit=3)
 
-    assert [c.policy_no for c in candidates] == ["OPEN", "ALWAYS", "NEXT-YEAR"]
-
-
-def test_candidates_follow_status_when_top_is_not_clear():
-    # 점수가 비슷하면 확실한 1위가 없어 신청 가능한 정책이 우선
-    groups = [
-        PolicyGroup("CLOSED", 0.500, []),
-        PolicyGroup("OPEN", 0.495, []),
-        PolicyGroup("ALWAYS", 0.490, []),
-    ]
-
-    candidates = pick_candidates(groups, POLICIES, TODAY, limit=2)
-
-    assert [c.policy_no for c in candidates] == ["OPEN", "ALWAYS"]
+    assert [c.policy_no for c in candidates] == ["NEXT-YEAR", "OPEN"]
 
 
 def test_candidates_skip_policies_without_record():
@@ -157,22 +139,14 @@ def test_candidates_keep_one_per_policy_name():
     assert [c.policy_no for c in candidates] == ["OPEN", "ALWAYS", "UNKNOWN"]
 
 
-
-def test_split_candidates_take_half_each_and_fill_shortage():
-    policies = {
-        no: PolicyRecord(
-            policy_no=no, policy_name=f"정책 {no}", application_period_type_code=ALWAYS_OPEN_CODE,
-            application_start_date=None, application_end_date=None,
-            application_url=None, reference_url_1=None, reference_url_2=None, supervising_org_name=None,
-        )
-        for no in ["L1", "L2", "L3", "L4", "N1", "N2", "N3", "N4"]
+def test_local_first_keeps_candidates_and_order_within_groups():
+    candidates = _groups("NATION", "SEOUL", "MULTI", "GANGNAM", "BUSAN")
+    labels = {
+        "NATION": "전국", "SEOUL": "서울특별시", "MULTI": "서울특별시 외 14개 시도",
+        "GANGNAM": "서울특별시 강남구", "BUSAN": "부산광역시",
     }
-    local = [PolicyGroup(no, 0.9 - i * 0.01, []) for i, no in enumerate(["L1", "L2", "L3", "L4"])]
-    national = [PolicyGroup(no, 0.95 - i * 0.01, []) for i, no in enumerate(["N1", "N2", "N3", "N4"])]
 
-    even = pick_split_candidates(local, national, policies, TODAY, limit=6)
-    # 지역 정책이 하나뿐이면 나머지는 전국 정책으로 채움
-    short = pick_split_candidates(local[:1], national, policies, TODAY, limit=6)
+    ordered = local_first(candidates, labels, "서울특별시")
 
-    assert {c.policy_no for c in even} == {"L1", "L2", "L3", "N1", "N2", "N3"}
-    assert {c.policy_no for c in short} == {"L1", "N1", "N2", "N3", "N4"}
+    # 그 시도 정책만 앞으로 오고, 여러 시도에 걸친 정책은 지역 정책으로 보지 않음
+    assert [c.policy_no for c in ordered] == ["SEOUL", "GANGNAM", "NATION", "MULTI", "BUSAN"]

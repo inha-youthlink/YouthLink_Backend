@@ -38,8 +38,8 @@ class FakeRetriever:
 
     async def retrieve(self, query, policy_ids, k):
         self.calls.append((query, policy_ids))
-        # 확실한 1위는 상태와 관계없이 남으므로 마감 정책을 2위로 둠
-        return [_chunk("P-A", 0.9), _chunk("P-CLOSED", 0.8), _chunk("P-B", 0.7), _chunk("P-C", 0.6)]
+        # 마감 정책은 2위지만 다른 정책(정보 없음)과의 점수 차가 감점 차이보다 작음
+        return [_chunk("P-A", 0.9), _chunk("P-CLOSED", 0.71), _chunk("P-B", 0.7), _chunk("P-C", 0.69)]
 
 
 class FakePolicyRepository:
@@ -54,11 +54,8 @@ class FakePolicyRepository:
         self.filters.append(policy_filter)
         return ["P-A", "P-B", "P-C", "P-CLOSED"]
 
-    async def nationwide_policy_nos(self):
-        return frozenset({"P-B", "P-C"})
-
     async def get_region_labels(self, policy_nos):
-        return {no: "전국" for no in policy_nos}
+        return {no: "인천광역시 부평구" if no == "P-C" else "전국" for no in policy_nos}
 
     async def get_by_ids(self, policy_nos):
         records = [_record("P-CLOSED", CLOSED_CODE), _record("P-A"), _record("P-B"), _record("P-C")]
@@ -110,12 +107,12 @@ def _analysis(**sub_fields) -> AnalysisResult:
     )
 
 
-async def test_candidates_follow_status_order():
+async def test_candidates_use_status_penalty():
     repository = FakePolicyRepository()
 
     evidence = await search.collect(_ctx(repository))
 
-    # 마감 정책은 점수가 더 높아도 뒤로 밀려 후보 3개에서 빠짐
+    # 마감 정책은 감점 뒤 점수가 3위보다 낮아져 후보 3개에서 빠짐
     assert [group.policy_no for group in evidence.candidates] == ["P-A", "P-B", "P-C"]
     assert repository.document_requests == [["P-A", "P-B", "P-C"]]
     assert evidence.documents["P-A"] == ["P-A 원문"]
@@ -132,18 +129,18 @@ async def test_question_region_filters_and_search_query_used():
         profile=Profile(age=27, region_code="11680"),
     )
 
-    await search.collect(ctx)
+    evidence = await search.collect(ctx)
 
     # 질문 지역이 프로필 지역보다 우선하고, 나이는 프로필 값을 씀
     assert repository.filters == [
         PolicyFilter(sido_code="28", age=27, exclude_closed=True, exclude_upcoming=True)
     ]
-    # 지역 조건이 있으면 지역 정책과 전국 정책을 같은 검색어로 따로 검색함
-    assert ctx.deps.retriever.calls == [("청년 주거 지원", ["P-A", "P-CLOSED"]), ("청년 주거 지원", ["P-B", "P-C"])]
+    assert ctx.deps.retriever.calls == [("청년 주거 지원", ["P-A", "P-B", "P-C", "P-CLOSED"])]
+    # 질문 지역(인천) 정책이 카드 앞으로 옴
+    assert [group.policy_no for group in evidence.candidates] == ["P-C", "P-A", "P-B"]
     assert ctx.trace["conditions"] == {
         "lines": ["지역: 인천광역시 (질문)", "나이: 27세 (프로필)", "신청 상태: 지금 신청 가능한 정책만 (질문)"],
         "filtered_policy_count": 4,
-        "split_search": True,
     }
 
 
@@ -155,4 +152,4 @@ async def test_no_filter_when_analysis_missing():
 
     assert repository.filters == []
     assert ctx.deps.retriever.calls == [("청년 주거 지원", None)]
-    assert ctx.trace["conditions"] == {"lines": [], "filtered_policy_count": None, "split_search": False}
+    assert ctx.trace["conditions"] == {"lines": [], "filtered_policy_count": None}

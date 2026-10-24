@@ -126,9 +126,3 @@ async def test_list_regions(repository):
     rows = await repository.list_regions()
 
     assert {(row.sido_code, row.sigungu_name) for row in rows} == {("11", "종로구"), ("11", "강남구"), ("28", "부평구")}
-
-
-async def test_nationwide_policy_nos(repository):
-    nationwide = await repository.nationwide_policy_nos()
-
-    assert {no for no in nationwide if no.startswith("F-")} == NATIONWIDE

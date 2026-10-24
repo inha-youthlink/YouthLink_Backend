@@ -95,7 +95,7 @@ async def test_list_question_searches_and_llm_picks_cards():
     assert (output.trace["handler"], output.trace["answer_kind"]) == ("search", "recommend")
     assert output.trace["prompt_version"] == "answer_common_v1+answer_cards_v1+answer_recommend_v1"
     assert output.trace["cards"] == {"candidate_nos": ["P-RENT", "P-MOVE"], "selected": [2], "fallback": False}
-    assert output.trace["conditions"]["split_search"] is False
+    assert output.trace["conditions"]["filtered_policy_count"] is None
 
 
 async def test_all_candidates_shown_when_first_line_missing():
