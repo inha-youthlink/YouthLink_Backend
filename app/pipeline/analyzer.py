@@ -1,5 +1,5 @@
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -7,7 +7,7 @@ from openai import OpenAIError
 from pydantic import ValidationError
 
 from app.pipeline.context import PipelineContext
-from app.pipeline.generator import PROMPTS_DIR
+from app.pipeline.prompts import load_prompt
 from app.schemas.analysis import Intent, JobStatus, QueryAnalysis, SchoolLevel, StatusFilter, SubQuery
 from app.schemas.pipeline import ConversationTurn, PipelineInput, PolicyRef
 
@@ -38,6 +38,8 @@ class ResolvedSubQuery:
     age: int | None = None
     job_status: JobStatus = JobStatus.NONE
     school: SchoolLevel = SchoolLevel.NONE
+    # 후보에 없는 표기. 없는 카드 번호를 가리킨 경우라 라우터가 되묻기로 보냄
+    unresolved_refs: list[str] = field(default_factory=list)
 
     @property
     def target_policy_nos(self) -> list[str]:
@@ -94,7 +96,7 @@ class AnalysisResult:
 async def analyze(ctx: PipelineContext) -> AnalysisResult:
     llm = ctx.deps.llm
     labels, user_message = _build_input(ctx.input, ctx.deps.settings.analysis_answer_max_chars)
-    system_prompt = (PROMPTS_DIR / f"{PROMPT_NAME}.md").read_text(encoding="utf-8")
+    system_prompt = load_prompt(PROMPT_NAME)
 
     try:
         result = await llm.analyze(
@@ -145,7 +147,7 @@ def _failed(
 
 
 def _resolve(sub: SubQuery, labels: dict[str, PolicyRef]) -> ResolvedSubQuery:
-    refs = (ref.strip().upper() for ref in sub.target_refs)
+    refs = [ref.strip().upper() for ref in sub.target_refs if ref.strip()]
     targets = {labels[ref].policy_no: labels[ref] for ref in refs if ref in labels}
     return ResolvedSubQuery(
         standalone_question=sub.standalone_question,
@@ -159,6 +161,7 @@ def _resolve(sub: SubQuery, labels: dict[str, PolicyRef]) -> ResolvedSubQuery:
         age=sub.age if sub.age is not None and 0 < sub.age < 100 else None,
         job_status=sub.job_status,
         school=sub.school,
+        unresolved_refs=[ref for ref in refs if ref not in labels],
     )
 
 

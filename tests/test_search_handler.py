@@ -3,10 +3,9 @@ from datetime import date
 
 from app.core.config import Settings
 from app.core.dependencies import PipelineDeps
-from app.llm.client import ChatResult
 from app.pipeline.analyzer import AnalysisResult, ResolvedSubQuery
 from app.pipeline.context import PipelineContext
-from app.pipeline.handlers import default_rag
+from app.pipeline.handlers import search
 from app.repositories.policy_repository import PolicyFilter, PolicyRecord, RegionRow
 from app.schemas.analysis import Intent, StatusFilter
 from app.schemas.pipeline import Chunk, PipelineInput, Profile
@@ -75,19 +74,7 @@ class FakeCommonCodes:
         return {}
 
 
-class FakeLLM:
-    chat_model = "fake-chat-model"
-    embedding_model = "fake-embedding-model"
-
-    def __init__(self, text: str) -> None:
-        self._text = text
-
-    async def chat(self, messages):
-        return ChatResult(text=self._text, prompt_tokens=100, completion_tokens=20)
-
-
 def _ctx(
-    llm_text: str,
     repository: FakePolicyRepository,
     analysis: AnalysisResult | None = None,
     profile: Profile | None = None,
@@ -97,7 +84,7 @@ def _ctx(
     )
     deps = PipelineDeps(
         settings=settings,
-        llm=FakeLLM(llm_text),
+        llm=None,
         retriever=FakeRetriever(),
         policy_repository=repository,
         common_code_repository=FakeCommonCodes(),
@@ -123,45 +110,29 @@ def _analysis(**sub_fields) -> AnalysisResult:
     )
 
 
-async def test_cards_follow_status_order_and_selection():
+async def test_candidates_follow_status_order():
     repository = FakePolicyRepository()
 
-    output = await default_rag.handle(_ctx("[소개: 1,3]\n1. 정책 P-A\n2. 정책 P-C", repository))
+    evidence = await search.collect(_ctx(repository))
 
     # 마감 정책은 점수가 더 높아도 뒤로 밀려 후보 3개에서 빠짐
+    assert [group.policy_no for group in evidence.candidates] == ["P-A", "P-B", "P-C"]
     assert repository.document_requests == [["P-A", "P-B", "P-C"]]
-    assert [policy.policy_no for policy in output.policies] == ["P-A", "P-C"]
-    assert output.answer == "1. 정책 P-A\n2. 정책 P-C"
-    assert output.trace["cards"] == {"candidate_nos": ["P-A", "P-B", "P-C"], "selected": [1, 3], "fallback": False}
-    assert output.trace["prompt_version"] == "generate_v4"
-    assert output.policies[0].region_label == "전국"
-
-
-async def test_no_cards_when_nothing_selected():
-    output = await default_rag.handle(_ctx("[소개: ]\n관련 정책을 찾지 못했어요.", FakePolicyRepository()))
-
-    assert output.policies == []
-    assert output.answer == "관련 정책을 찾지 못했어요."
-
-
-async def test_all_candidates_shown_when_first_line_missing():
-    output = await default_rag.handle(_ctx("첫 줄 없이 답변", FakePolicyRepository()))
-
-    assert [policy.policy_no for policy in output.policies] == ["P-A", "P-B", "P-C"]
-    assert output.answer == "첫 줄 없이 답변"
-    assert output.trace["cards"]["fallback"] is True
+    assert evidence.documents["P-A"] == ["P-A 원문"]
+    assert evidence.region_labels["P-A"] == "전국"
+    # 카드는 LLM이 첫 줄로 고름
+    assert evidence.fixed_cards is False
 
 
 async def test_question_region_filters_and_search_query_used():
     repository = FakePolicyRepository()
     ctx = _ctx(
-        "[소개: 1]\n답변",
         repository,
         analysis=_analysis(region="인천", status_filter=StatusFilter.OPEN_ONLY),
         profile=Profile(age=27, region_code="11680"),
     )
 
-    output = await default_rag.handle(ctx)
+    await search.collect(ctx)
 
     # 질문 지역이 프로필 지역보다 우선하고, 나이는 프로필 값을 씀
     assert repository.filters == [
@@ -169,7 +140,7 @@ async def test_question_region_filters_and_search_query_used():
     ]
     # 지역 조건이 있으면 지역 정책과 전국 정책을 같은 검색어로 따로 검색함
     assert ctx.deps.retriever.calls == [("청년 주거 지원", ["P-A", "P-CLOSED"]), ("청년 주거 지원", ["P-B", "P-C"])]
-    assert output.trace["conditions"] == {
+    assert ctx.trace["conditions"] == {
         "lines": ["지역: 인천광역시 (질문)", "나이: 27세 (프로필)", "신청 상태: 지금 신청 가능한 정책만 (질문)"],
         "filtered_policy_count": 4,
         "split_search": True,
@@ -178,10 +149,10 @@ async def test_question_region_filters_and_search_query_used():
 
 async def test_no_filter_when_analysis_missing():
     repository = FakePolicyRepository()
-    ctx = _ctx("[소개: 1]\n답변", repository, profile=Profile(age=27, region_code="11680"))
+    ctx = _ctx(repository, profile=Profile(age=27, region_code="11680"))
 
-    output = await default_rag.handle(ctx)
+    await search.collect(ctx)
 
     assert repository.filters == []
     assert ctx.deps.retriever.calls == [("청년 주거 지원", None)]
-    assert output.trace["conditions"] == {"lines": [], "filtered_policy_count": None, "split_search": False}
+    assert ctx.trace["conditions"] == {"lines": [], "filtered_policy_count": None, "split_search": False}

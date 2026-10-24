@@ -122,6 +122,7 @@ async def test_refs_resolved_and_invalid_refs_dropped():
     sub = result.sub_queries[0]
     assert sub.target_refs == ["2", "4", "청년 월세 지원", " c1 ", "2"]
     assert sub.target_policy_nos == [MOVING.policy_no, HOUSING_LOAN.policy_no]
+    assert sub.unresolved_refs == ["4", "청년 월세 지원"]
     assert result.fallback_reason is None
     assert (result.prompt_tokens, result.completion_tokens) == (100, 20)
     assert result.model == "fake-analysis-model"

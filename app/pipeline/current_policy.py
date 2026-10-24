@@ -9,6 +9,9 @@ def update_current_policies(inp: PipelineInput, analysis: AnalysisResult) -> lis
     # 분석이 실패하면 무엇을 말했는지 알 수 없어 대화 상태를 바꾸지 않음
     if analysis.fallback_reason is not None:
         return inp.current_policies
+    # 없는 카드 번호를 가리키면 되묻기로 가는데, 확인된 일부로 교체하면 되묻기 보기가 줄어듦
+    if any(sub.unresolved_refs for sub in analysis.sub_queries):
+        return inp.current_policies
 
     targets = {policy.policy_no: policy for sub in analysis.sub_queries for policy in sub.targets}
     # 이전 정책을 남기면 이름 없는 다음 질문이 애매해져 교체함

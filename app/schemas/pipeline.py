@@ -83,6 +83,7 @@ PUBLIC_TRACE_KEYS = frozenset({
     "prompt_version",
     "embedding_model",
     "handler",
+    "answer_kind",
     "analysis",
     "current_policy_nos",
     "cards",

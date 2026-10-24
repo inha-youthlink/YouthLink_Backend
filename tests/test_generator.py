@@ -7,6 +7,7 @@ from app.core.dependencies import PipelineDeps
 from app.llm.client import ChatResult
 from app.pipeline import generator
 from app.pipeline.context import PipelineContext
+from app.pipeline.evidence import AnswerKind, Evidence
 from app.pipeline.generator import parse_card_line
 from app.pipeline.grouping import PolicyGroup
 from app.repositories.policy_repository import PolicyRecord
@@ -80,7 +81,7 @@ def _record(policy_no: str, name: str, code: str | None = None, **links) -> Poli
     )
 
 
-def _ctx(llm: FakeLLM) -> PipelineContext:
+def _ctx(llm: FakeLLM, kind: AnswerKind = AnswerKind.RECOMMEND, fixed_cards: bool = False) -> PipelineContext:
     settings = Settings(openai_api_key="test", database_url="postgresql+asyncpg://test@localhost/test")
     deps = PipelineDeps(
         settings=settings, llm=llm, retriever=None, policy_repository=None, common_code_repository=FakeCommonCodes()
@@ -88,20 +89,28 @@ def _ctx(llm: FakeLLM) -> PipelineContext:
     ctx = PipelineContext(
         input=PipelineInput(question="서울 월세 지원 알려줘"), deps=deps, query="서울 월세 지원 알려줘", today=date(2026, 10, 23)
     )
-    ctx.candidates = [PolicyGroup("P-RENT", 0.9, []), PolicyGroup("P-LOAN", 0.8, [])]
-    ctx.policies = {
-        "P-RENT": _record(
-            "P-RENT",
-            "청년 월세 지원",
-            application_url="www.example.go.kr",
-            reference_url_1="https://www.example.go.kr",
-            reference_url_2="https://www.example.go.kr/rent",
-            org="서울특별시 주택정책과",
-        ),
-        "P-LOAN": _record("P-LOAN", "청년 전세 이자 지원", CLOSED_CODE),
-    }
-    ctx.documents = {"P-RENT": ["정책명: 청년 월세 지원\n적용 지역: 서울특별시", "지원 내용: 월 20만 원"]}
+    ctx.answer_kind = kind
+    ctx.evidence = Evidence(
+        candidates=[PolicyGroup("P-RENT", 0.9, []), PolicyGroup("P-LOAN", 0.8, [])],
+        policies={
+            "P-RENT": _record(
+                "P-RENT",
+                "청년 월세 지원",
+                application_url="www.example.go.kr",
+                reference_url_1="https://www.example.go.kr",
+                reference_url_2="https://www.example.go.kr/rent",
+                org="서울특별시 주택정책과",
+            ),
+            "P-LOAN": _record("P-LOAN", "청년 전세 이자 지원", CLOSED_CODE),
+        },
+        documents={"P-RENT": ["정책명: 청년 월세 지원\n적용 지역: 서울특별시", "지원 내용: 월 20만 원"]},
+        fixed_cards=fixed_cards,
+    )
     return ctx
+
+
+def _system_prompt(llm: FakeLLM) -> str:
+    return llm.messages[0]["content"]
 
 
 async def test_generate_uses_whole_documents_of_candidates():
@@ -124,5 +133,57 @@ async def test_generate_uses_whole_documents_of_candidates():
     ) in user_message
     assert result.card_numbers == [2]
     assert result.answer == "전세 이자 지원은 마감되었어요."
-    assert result.prompt_version == "generate_v4"
+    assert result.prompt_version == "answer_common_v1+answer_cards_v1+answer_recommend_v1"
     assert len(result.contexts) == 2
+
+
+async def test_search_detail_keeps_card_line():
+    llm = FakeLLM("[소개: 1]\n청년 월세 지원은 월 20만 원을 지원해요.")
+
+    result = await generator.generate(_ctx(llm, AnswerKind.DETAIL))
+
+    # 처음 묻는 정책 이름은 검색 후보 중 하나를 LLM이 골라야 해서 첫 줄 형식을 유지함
+    assert result.prompt_version == "answer_common_v1+answer_cards_v1+answer_detail_v1"
+    assert "# 출력 형식" in _system_prompt(llm)
+    assert "# 신청 방법 안내" in _system_prompt(llm)
+    assert result.card_numbers == [1]
+
+
+async def test_fixed_cards_skip_card_line():
+    llm = FakeLLM("청년 월세 지원은 월 20만 원을 지원해요.")
+
+    result = await generator.generate(_ctx(llm, AnswerKind.DETAIL, fixed_cards=True))
+
+    assert result.prompt_version == "answer_common_v1+answer_detail_v1"
+    assert "[소개:" not in _system_prompt(llm)
+    assert result.card_numbers == [1, 2]
+    assert result.answer == "청년 월세 지원은 월 20만 원을 지원해요."
+
+
+async def test_short_answer_has_no_evidence():
+    llm = FakeLLM("안녕하세요! 궁금한 청년 정책이 있으면 물어봐 주세요.")
+    ctx = _ctx(llm, AnswerKind.SHORT, fixed_cards=True)
+    ctx.evidence = Evidence(fixed_cards=True)
+
+    result = await generator.generate(ctx)
+
+    assert result.prompt_version == "answer_short_v1"
+    assert llm.messages[1]["content"] == "[질문]\n서울 월세 지원 알려줘"
+    assert result.contexts == []
+    assert result.card_numbers == []
+
+
+async def test_reply_skips_llm():
+    llm = FakeLLM("호출되면 안 됨")
+    ctx = _ctx(llm, AnswerKind.CLARIFY, fixed_cards=True)
+    ctx.evidence = Evidence(
+        candidates=ctx.evidence.candidates, policies=ctx.evidence.policies, fixed_cards=True, reply="어느 정책을 말씀하시나요?"
+    )
+
+    result = await generator.generate(ctx)
+
+    assert llm.messages == []
+    assert result.answer == "어느 정책을 말씀하시나요?"
+    assert result.prompt_version is None
+    assert result.card_numbers == [1, 2]
+    assert (result.prompt_tokens, result.completion_tokens) == (0, 0)
