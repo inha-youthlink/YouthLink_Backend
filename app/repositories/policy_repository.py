@@ -6,7 +6,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.schemas.policy_info import ALWAYS_OPEN_CODE, CLOSED_CODE
+from app.schemas.pipeline import PolicyItem
+from app.schemas.policy_info import ALWAYS_OPEN_CODE, CLOSED_CODE, application_status, clean_url
 
 NO_RESTRICTION_MARRIAGE_CODE = "0055003"
 ANNUAL_INCOME_CODE = "0043002"
@@ -99,6 +100,22 @@ class PolicyRecord:
     reference_url_1: str | None
     reference_url_2: str | None
     supervising_org_name: str | None
+
+    # 검색 답변의 카드와 기록 복원 카드가 같은 규칙으로 만들어져야 해서 한 곳에 둠
+    def to_item(self, score: float, today: date, region_label: str | None) -> PolicyItem:
+        return PolicyItem(
+            policy_no=self.policy_no,
+            policy_name=self.policy_name,
+            application_start_date=self.application_start_date,
+            application_end_date=self.application_end_date,
+            application_url=clean_url(self.application_url),
+            score=score,
+            application_status=application_status(
+                self.application_period_type_code, self.application_start_date, self.application_end_date, today
+            ),
+            supervising_org_name=self.supervising_org_name,
+            region_label=region_label,
+        )
 
 
 class PolicyRepository:
