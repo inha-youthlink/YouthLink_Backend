@@ -143,6 +143,7 @@ async def test_profile_conditions_filter_and_search_query_used():
     assert [group.policy_no for group in evidence.candidates] == ["P-C", "P-A", "P-B"]
     assert evidence.filtered is True
     assert ctx.trace["conditions"] == {"filtered_policy_count": 4}
+    assert ctx.trace["filtered_policy_nos"] == ["P-A", "P-B", "P-C", "P-CLOSED"]
 
 
 async def test_no_filter_without_profile():
@@ -154,3 +155,4 @@ async def test_no_filter_without_profile():
     assert repository.filters == []
     assert ctx.deps.retriever.calls == [("청년 주거 지원", None)]
     assert ctx.trace["conditions"] == {"filtered_policy_count": None}
+    assert ctx.trace["filtered_policy_nos"] is None

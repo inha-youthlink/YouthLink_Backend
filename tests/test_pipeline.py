@@ -97,6 +97,8 @@ async def test_list_question_searches_and_llm_picks_cards():
     assert output.trace["prompt_version"] == "answer_common_v2+answer_cards_v2+answer_recommend_v1"
     assert output.trace["cards"] == {"candidate_nos": ["P-RENT", "P-MOVE"], "selected": [2], "fallback": False}
     assert output.trace["conditions"]["filtered_policy_count"] is None
+    # 프로필이 없어 필터를 걸지 않음
+    assert output.trace["filtered_policy_nos"] is None
 
 
 async def test_all_candidates_shown_when_first_line_missing():
@@ -122,6 +124,8 @@ async def test_targeted_detail_uses_target_without_search():
     assert output.trace["prompt_version"] == "answer_common_v2+answer_detail_v1"
     assert output.current_policies == [MOVE]
     assert "filtered_policy_count" not in output.trace["conditions"]
+    # 검색하지 않은 응답도 평가 서버가 읽는 키를 가짐
+    assert (output.trace["retrieved_chunks"], output.trace["filtered_policy_nos"]) == ([], None)
 
 
 async def test_chitchat_answers_without_evidence():
@@ -134,6 +138,7 @@ async def test_chitchat_answers_without_evidence():
     assert output.policies == []
     assert output.trace["contexts"] == []
     assert output.trace["prompt_version"] == "answer_short_v1"
+    assert (output.trace["retrieved_chunks"], output.trace["filtered_policy_nos"]) == ([], None)
 
 
 async def test_missing_card_number_clarifies_without_llm_answer():
@@ -149,6 +154,7 @@ async def test_missing_card_number_clarifies_without_llm_answer():
     assert output.trace["handler"] == "clarify"
     assert output.trace["prompt_version"] is None
     assert output.trace["tokens"] == {"prompt": 0, "completion": 0}
+    assert (output.trace["retrieved_chunks"], output.trace["filtered_policy_nos"]) == ([], None)
     assert set(output.trace["latency_ms"]) >= {"analyze", "generate", "total"}
 
 

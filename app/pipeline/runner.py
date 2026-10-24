@@ -48,6 +48,9 @@ async def run_pipeline(inp: PipelineInput, deps: PipelineDeps) -> PipelineOutput
     ctx.trace["handler"] = route.handler.value
     ctx.trace["answer_kind"] = route.answer_kind.value
     ctx.evidence = await HANDLERS[route.handler](ctx)
+    # 평가 서버가 핸들러와 관계없이 같은 키로 읽어, 검색하지 않은 응답은 빈 검색 결과와 필터 미적용으로 둠
+    ctx.trace.setdefault("retrieved_chunks", [])
+    ctx.trace.setdefault("filtered_policy_nos", None)
 
     generate_started = perf_counter()
     result = await generate(ctx)

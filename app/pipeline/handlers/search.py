@@ -42,6 +42,8 @@ async def collect(ctx: PipelineContext) -> Evidence:
         None if policy_ids is None else len(policy_ids)
     )
     ctx.trace.update({
+        # 평가에서 정답 정책이 필터에서 빠졌는지 보려고 통과 목록을 남김. None이면 필터를 걸지 않음
+        "filtered_policy_nos": policy_ids,
         "retrieved_chunks": [
             {
                 "chunk_id": str(chunk.chunk_id),
