@@ -8,12 +8,12 @@ from pydantic import ValidationError
 
 from app.pipeline.context import PipelineContext
 from app.pipeline.generator import PROMPTS_DIR
-from app.schemas.analysis import Intent, QueryAnalysis, StatusFilter, SubQuery
+from app.schemas.analysis import Intent, JobStatus, QueryAnalysis, SchoolLevel, StatusFilter, SubQuery
 from app.schemas.pipeline import ConversationTurn, PipelineInput, PolicyRef
 
 logger = logging.getLogger(__name__)
 
-PROMPT_NAME = "analyze_v2"
+PROMPT_NAME = "analyze_v3"
 # 프롬프트 규칙("최대 3개")과 함께 바뀌어야 해서 설정값이 아닌 상수로 둠
 MAX_SUB_QUERIES = 3
 NONE_TEXT = "없음"
@@ -33,6 +33,11 @@ class ResolvedSubQuery:
     targets: list[PolicyRef]
     intent: Intent
     status_filter: StatusFilter
+    search_query: str = ""
+    region: str = ""
+    age: int | None = None
+    job_status: JobStatus = JobStatus.NONE
+    school: SchoolLevel = SchoolLevel.NONE
 
     @property
     def target_policy_nos(self) -> list[str]:
@@ -57,10 +62,15 @@ class AnalysisResult:
             "sub_queries": [
                 {
                     "standalone_question": sub.standalone_question,
+                    "search_query": sub.search_query,
                     "target_refs": sub.target_refs,
                     "target_policy_nos": sub.target_policy_nos,
                     "intent": sub.intent.value,
                     "status_filter": sub.status_filter.value,
+                    "region": sub.region,
+                    "age": sub.age,
+                    "job_status": sub.job_status.value,
+                    "school": sub.school.value,
                 }
                 for sub in self.sub_queries
             ],
@@ -69,10 +79,15 @@ class AnalysisResult:
         }
 
     # 하위 질문이 여럿이면 원래 질문 대신 맥락이 풀린 질문을 이어 붙여 지시어·배경 설명을 피함
-    def search_query(self, original: str) -> str:
+    def standalone_question(self, original: str) -> str:
         if not self.sub_queries:
             return original
         return " ".join(sub.standalone_question for sub in self.sub_queries)
+
+    # 조건을 뺀 검색어. 인사처럼 검색어가 비면 독립 질문으로 검색함
+    def search_query(self, original: str) -> str:
+        queries = [sub.search_query.strip() for sub in self.sub_queries if sub.search_query.strip()]
+        return " ".join(queries) if queries else self.standalone_question(original)
 
 
 # 분석은 정확도를 높이는 단계라 실패해도 예외를 넘기지 않고 원래 질문으로 진행함
@@ -134,10 +149,16 @@ def _resolve(sub: SubQuery, labels: dict[str, PolicyRef]) -> ResolvedSubQuery:
     targets = {labels[ref].policy_no: labels[ref] for ref in refs if ref in labels}
     return ResolvedSubQuery(
         standalone_question=sub.standalone_question,
+        search_query=sub.search_query,
         target_refs=sub.target_refs,
         targets=list(targets.values()),
         intent=sub.intent,
         status_filter=sub.status_filter,
+        region=sub.region.strip(),
+        # 나이를 잘못 읽은 값으로 정책을 빼지 않도록 사람 나이로 보기 어려운 값은 버림
+        age=sub.age if sub.age is not None and 0 < sub.age < 100 else None,
+        job_status=sub.job_status,
+        school=sub.school,
     )
 
 
