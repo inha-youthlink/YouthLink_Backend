@@ -14,20 +14,26 @@ REGIONS = [
     ("11110", "11", "110", "서울특별시", "종로구"),
     ("11680", "11", "680", "서울특별시", "강남구"),
     ("28237", "28", "237", "인천광역시", "부평구"),
+    ("41113", "41", "113", "경기도", "수원시 권선구"),
+    ("41117", "41", "117", "경기도", "수원시 영통구"),
 ]
+SEOUL = ["11110", "11680"]
+NATION = [region[0] for region in REGIONS]
 # policy_no: 지역 코드 목록, 그 밖의 컬럼
 POLICIES = {
-    "F-SEOUL": (["11110", "11680"], {}),
+    "F-SEOUL": (SEOUL, {}),
+    "F-JONGNO": (["11110"], {}),
     "F-GANGNAM": (["11680"], {"min_age": 19, "max_age": 34}),
     "F-INCHEON": (["28237"], {}),
-    "F-NATION": (["11110", "11680", "28237"], {"income_condition_code": "0043002", "max_income": 2500}),
-    "F-CLOSED": (["11110", "11680", "28237"], {"application_period_type_code": CLOSED_CODE}),
-    "F-UPCOMING": (["11110", "11680", "28237"], {
+    "F-GWONSEON": (["41113"], {}),
+    "F-NATION": (NATION, {"income_condition_code": "0043002", "max_income": 2500}),
+    "F-CLOSED": (NATION, {"application_period_type_code": CLOSED_CODE}),
+    "F-UPCOMING": (NATION, {
         "application_period_type_code": PERIOD_CODE,
         "application_start_date": date(2026, 11, 1), "application_end_date": date(2026, 11, 30),
     }),
-    "F-ALWAYS": (["11110", "11680", "28237"], {"application_period_type_code": ALWAYS_OPEN_CODE}),
-    "F-MARRIED": (["11110", "11680", "28237"], {"marriage_status_code": "0055001"}),
+    "F-ALWAYS": (NATION, {"application_period_type_code": ALWAYS_OPEN_CODE}),
+    "F-MARRIED": (NATION, {"marriage_status_code": "0055001"}),
 }
 JOB_CODES = {"F-SEOUL": [UNEMPLOYED], "F-INCHEON": [EMPLOYED], "F-ALWAYS": [JOB_ANY], "F-MARRIED": [JOB_OTHER]}
 
@@ -87,8 +93,16 @@ async def test_no_conditions_keep_everything(repository):
 
 
 async def test_region_keeps_sido_and_nationwide(repository):
-    assert await _filter(repository, sido_code="11") == NATIONWIDE | {"F-SEOUL", "F-GANGNAM"}
+    assert await _filter(repository, sido_code="11") == NATIONWIDE | {"F-SEOUL", "F-JONGNO", "F-GANGNAM"}
     assert await _filter(repository, sido_code="28") == NATIONWIDE | {"F-INCHEON"}
+    assert await _filter(repository, sido_code="41") == NATIONWIDE | {"F-GWONSEON"}
+
+
+async def test_sigungu_keeps_own_sido_wide_and_nationwide(repository):
+    # 같은 시도의 다른 구 전용 정책(F-JONGNO)만 빠짐
+    assert await _filter(repository, region_codes=("11680",)) == NATIONWIDE | {"F-SEOUL", "F-GANGNAM"}
+    # 구가 있는 시(수원시)는 그 시의 구 중 하나만 맞아도 남음
+    assert await _filter(repository, region_codes=("41113", "41117")) == NATIONWIDE | {"F-GWONSEON"}
 
 
 async def test_age_excludes_only_out_of_range(repository):
@@ -125,4 +139,7 @@ async def test_region_labels(repository):
 async def test_list_regions(repository):
     rows = await repository.list_regions()
 
-    assert {(row.sido_code, row.sigungu_name) for row in rows} == {("11", "종로구"), ("11", "강남구"), ("28", "부평구")}
+    assert {(row.region_code, row.sido_code, row.sigungu_name) for row in rows} == {
+        ("11110", "11", "종로구"), ("11680", "11", "강남구"), ("28237", "28", "부평구"),
+        ("41113", "41", "수원시 권선구"), ("41117", "41", "수원시 영통구"),
+    }

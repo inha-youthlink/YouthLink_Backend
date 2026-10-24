@@ -130,9 +130,9 @@ async def _format_profile(ctx: PipelineContext) -> str:
     code_names = await load_code_names(ctx)
 
     lines = []
-    region_name = (await load_regions(ctx)).sido_names.get(profile.region_code[:2]) if profile.region_code else None
-    if region_name:
-        lines.append(f"지역: {region_name}")
+    region = (await load_regions(ctx)).profile_region(profile.region_code) if profile.region_code else None
+    if region:
+        lines.append(f"지역: {region.label}")
     if profile.age is not None:
         lines.append(f"나이: {profile.age}세")
     if profile.gender:

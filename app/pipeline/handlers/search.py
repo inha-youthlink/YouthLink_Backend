@@ -35,7 +35,7 @@ async def collect(ctx: PipelineContext) -> Evidence:
     region_labels = await deps.policy_repository.get_region_labels(candidate_nos)
     # 근거 순서가 카드 순서라 지역 조건이 있으면 그 시도 정책을 앞에 둠
     if conditions.region is not None:
-        candidates = local_first(candidates, region_labels, conditions.region.label)
+        candidates = local_first(candidates, region_labels, conditions.region.sido_name)
     latency["policy_lookup"] = _elapsed_ms(started)
 
     ctx.trace.setdefault("conditions", {})["filtered_policy_count"] = (

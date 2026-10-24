@@ -43,7 +43,7 @@ class FakeRetriever:
         return [_chunk("P-A", 0.9), _chunk("P-CLOSED", 0.71), _chunk("P-B", 0.7), _chunk("P-C", 0.69)]
 
 
-REGIONS = RegionIndex([RegionRow("11", "서울특별시", "강남구"), RegionRow("28", "인천광역시", "부평구")])
+REGIONS = RegionIndex([RegionRow("11", "서울특별시", "강남구", "11680"), RegionRow("28", "인천광역시", "부평구", "28237")])
 
 
 class FakePolicyRepository:
@@ -136,7 +136,7 @@ async def test_profile_conditions_filter_and_search_query_used():
     evidence = await search.collect(ctx)
 
     assert repository.filters == [
-        PolicyFilter(sido_code="28", age=27, exclude_closed=True, exclude_upcoming=True)
+        PolicyFilter(sido_code="28", region_codes=("28237",), age=27, exclude_closed=True, exclude_upcoming=True)
     ]
     assert ctx.deps.retriever.calls == [("청년 주거 지원", ["P-A", "P-B", "P-C", "P-CLOSED"])]
     # 프로필 지역(인천) 정책이 카드 앞으로 옴
