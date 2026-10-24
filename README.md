@@ -115,7 +115,7 @@ RAG 평가·디버깅용입니다. 근거 원문 같은 내부 정보는 debug �
 - `handler`: `search` / `detail` / `short` / `clarify`. `answer_kind`: 답변 조각 `recommend` / `detail` / `short` / `clarify`
 - `prompt_version`: 조립한 프롬프트 조각 이름을 `+`로 이은 값 (예: `answer_common_v1+answer_cards_v1+answer_recommend_v1`). 되묻기는 LLM을 부르지 않아 `null`, `tokens`도 0
 - `cards`: 카드 결정 결과. `candidate_nos`(근거 순서의 후보 정책), `selected`(LLM이 고른 근거 번호, 1부터), `fallback`(답변 첫 줄 형식이 없어 후보 전체를 카드로 보인 경우 `true`)
-- `conditions`, `retrieved_chunks`: 검색 핸들러일 때만 있습니다. `conditions`는 1차 필터 조건(`lines`, 항목마다 질문·프로필 출처), 필터 후 정책 수(`filtered_policy_count`, 조건이 없으면 `null`), 지역·전국 분리 검색 여부(`split_search`)
+- `conditions`, `retrieved_chunks`: 검색 핸들러일 때만 있습니다. `conditions`는 1차 필터 조건(`lines`, 항목마다 질문·프로필 출처), 필터 후 정책 수(`filtered_policy_count`, 조건이 없으면 `null`)
 - `retrieved_chunks`: 검색된 청크 목록 (`chunk_id`, `policy_no`, `chunk_type`, `chunk_index`, `score`, `content`), 검색 점수순
 
 ### 채팅 API (`/api/rooms`)
