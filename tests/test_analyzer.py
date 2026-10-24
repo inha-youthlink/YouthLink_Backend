@@ -9,7 +9,7 @@ from app.llm.client import ParsedResult
 from app.pipeline import analyzer
 from app.pipeline.analyzer import FallbackReason
 from app.pipeline.context import PipelineContext
-from app.schemas.analysis import Intent, JobStatus, QueryAnalysis, SchoolLevel, StatusFilter, SubQuery
+from app.schemas.analysis import Category, Intent, JobStatus, QueryAnalysis, SchoolLevel, StatusFilter, SubQuery
 from app.schemas.pipeline import ConversationTurn, PipelineInput, PolicyRef
 
 MONTHLY_RENT = PolicyRef(policy_no="P-RENT", policy_name="청년 월세 지원")
@@ -35,7 +35,10 @@ class FakeLLM:
 def _sub(
     question: str, refs: list[str], intent: Intent = Intent.POLICY_DETAIL, search_query: str = "", **conditions
 ) -> SubQuery:
-    values = {"region": "", "age": None, "job_status": JobStatus.NONE, "school": SchoolLevel.NONE, **conditions}
+    values = {
+        "region": "", "age": None, "job_status": JobStatus.NONE, "school": SchoolLevel.NONE,
+        "category": Category.NONE, **conditions,
+    }
     return SubQuery(
         standalone_question=question, search_query=search_query, target_refs=refs, intent=intent,
         status_filter=StatusFilter.NONE, **values,
@@ -207,7 +210,7 @@ async def test_trace_after_success():
     trace = (await analyzer.analyze(_ctx(inp, llm))).to_trace()
 
     assert json.loads(json.dumps(trace)) == {
-        "prompt_version": "analyze_v4",
+        "prompt_version": "analyze_v5",
         "model": "fake-analysis-model",
         "tokens": {"prompt": 100, "completion": 20},
         "sub_queries": [{
@@ -221,6 +224,7 @@ async def test_trace_after_success():
             "age": 27,
             "job_status": "없음",
             "school": "없음",
+                "category": "없음",
         }],
         "is_new_topic": False,
         "fallback_reason": None,

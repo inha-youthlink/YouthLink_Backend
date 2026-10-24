@@ -3,6 +3,7 @@ from datetime import date
 from app.pipeline.cards import build_cards, local_first, pick_candidates
 from app.pipeline.grouping import PolicyGroup
 from app.repositories.policy_repository import PolicyRecord
+from app.schemas.analysis import Category
 from app.schemas.policy_info import ALWAYS_OPEN_CODE, CLOSED_CODE, ApplicationStatus
 
 TODAY = date(2026, 10, 23)
@@ -150,3 +151,24 @@ def test_local_first_keeps_candidates_and_order_within_groups():
 
     # 그 시도 정책만 앞으로 오고, 여러 시도에 걸친 정책은 지역 정책으로 보지 않음
     assert [c.policy_no for c in ordered] == ["SEOUL", "GANGNAM", "NATION", "MULTI", "BUSAN"]
+
+
+def test_category_bonus_lifts_same_category_policy():
+    def record(policy_no: str, categories: list[str]) -> PolicyRecord:
+        return PolicyRecord(
+            policy_no=policy_no, policy_name=policy_no, application_period_type_code=ALWAYS_OPEN_CODE,
+            application_start_date=None, application_end_date=None, application_url=None,
+            reference_url_1=None, reference_url_2=None, supervising_org_name=None, large_categories=categories,
+        )
+
+    # 옛 분류(복지문화)와 새 분류(금융･복지･문화)를 같은 분야로 봄
+    policies = {
+        "JOB": record("JOB", ["일자리"]), "OLD": record("OLD", ["복지문화"]), "NEW": record("NEW", ["금융･복지･문화"]),
+    }
+    groups = [PolicyGroup("JOB", 0.60, []), PolicyGroup("OLD", 0.58, []), PolicyGroup("NEW", 0.57, [])]
+
+    lifted = pick_candidates(groups, policies, TODAY, limit=2, categories=frozenset({Category.WELFARE_CULTURE}))
+    plain = pick_candidates(groups, policies, TODAY, limit=2)
+
+    assert [c.policy_no for c in lifted] == ["OLD", "NEW"]
+    assert [c.policy_no for c in plain] == ["JOB", "OLD"]

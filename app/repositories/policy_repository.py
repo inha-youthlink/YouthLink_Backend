@@ -16,7 +16,7 @@ MAX_INCOME_MANWON = 100_000
 _GET_BY_IDS_SQL = text("""
 SELECT policy_no, policy_name,
        application_period_type_code, application_start_date, application_end_date,
-       application_url, reference_url_1, reference_url_2, supervising_org_name
+       application_url, reference_url_1, reference_url_2, supervising_org_name, large_categories
 FROM policy
 WHERE policy_no = ANY(:policy_nos)
 """)
@@ -89,6 +89,7 @@ class PolicyRecord:
     reference_url_1: str | None
     reference_url_2: str | None
     supervising_org_name: str | None
+    large_categories: list[str] = field(default_factory=list)
 
     # 검색 답변의 카드와 기록 복원 카드가 같은 규칙으로 만들어져야 해서 한 곳에 둠
     def to_item(self, score: float, today: date, region_label: str | None) -> PolicyItem:

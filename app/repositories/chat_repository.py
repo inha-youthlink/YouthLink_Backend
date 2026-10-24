@@ -57,7 +57,7 @@ _LIST_POLICY_REFS_SQL = text("""
 SELECT r.message_id, r.relevance_score AS score,
        p.policy_no, p.policy_name,
        p.application_period_type_code, p.application_start_date, p.application_end_date,
-       p.application_url, p.reference_url_1, p.reference_url_2, p.supervising_org_name
+       p.application_url, p.reference_url_1, p.reference_url_2, p.supervising_org_name, p.large_categories
 FROM message_policy_ref r
 JOIN policy p ON p.policy_no = r.policy_no
 WHERE r.message_id = ANY(:message_ids)
