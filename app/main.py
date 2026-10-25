@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api import health, internal, rooms
 from app.core.config import get_settings
+from app.core.errors import register_error_handlers
 from app.llm.client import LLMClient
 from app.pipeline.retrieval.factory import create_retriever
 from app.repositories.chat_repository import ChatRepository
@@ -48,6 +49,8 @@ app = FastAPI(
     debug=settings.debug,
     lifespan=lifespan,
 )
+
+register_error_handlers(app)
 
 app.include_router(health.router)
 app.include_router(internal.router)
