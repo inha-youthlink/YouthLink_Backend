@@ -41,6 +41,8 @@ async def test_create_and_get_room(chat_repository):
     room = await chat_repository.get_room(room_id)
 
     assert room.user_id == USER_ID
+    assert room.title is None
+    assert room.created_at.tzinfo is not None
     assert room.profile.age == 27
     assert room.profile.region_code == "11680"
     assert room.profile.annual_income is None
@@ -164,16 +166,17 @@ async def test_save_turn_updates_room_time(chat_repository, session_factory):
 
 
 async def test_list_rooms_by_user(chat_repository):
-    older = await chat_repository.create_room(USER_ID, Profile())
+    older = await chat_repository.create_room(USER_ID, Profile(age=27))
     newer = await chat_repository.create_room(USER_ID, Profile())
     await chat_repository.create_room("other-user", Profile())
     await _save_turn(chat_repository, older, "질문")
 
     rooms = await chat_repository.list_rooms(USER_ID)
 
-    # 늦게 만든 방보다 최근에 대화한 방이 위에 옴
-    assert [room.room_id for room in rooms] == [older, newer]
-    assert (rooms[0].title, rooms[1].title) == ("질문 제목", None)
+    # 계약대로 만든 순서이고, 나중에 대화해도 순서가 바뀌지 않음
+    assert [room.room_id for room in rooms] == [newer, older]
+    assert (rooms[0].title, rooms[1].title) == (None, "질문 제목")
+    assert rooms[1].profile.age == 27
 
 
 # 이후 턴에서 제목이 바뀌면 목록에서 같은 채팅방을 찾기 어려워 첫 턴 제목을 유지해야 함
