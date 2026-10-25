@@ -44,10 +44,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 settings = get_settings()
 
+# 운영에서는 API 문서를 끄고 경로 목록을 공개하지 않음
 app = FastAPI(
     title=settings.app_name,
     debug=settings.debug,
     lifespan=lifespan,
+    docs_url=None if settings.is_prod else "/docs",
+    redoc_url=None if settings.is_prod else "/redoc",
+    openapi_url=None if settings.is_prod else "/openapi.json",
 )
 
 register_error_handlers(app)

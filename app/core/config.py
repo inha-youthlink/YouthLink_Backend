@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +12,8 @@ class Settings(BaseSettings):
         extra="ignore",
         # .env.example을 그대로 복사해도 빈 값은 기본값을 사용함
         env_ignore_empty=True,
+        # 설정 오류 로그에 API 키·DB 비밀번호가 찍히지 않게 입력값을 숨김
+        hide_input_in_errors=True,
     )
 
     # App
@@ -51,6 +53,17 @@ class Settings(BaseSettings):
     chat_skeleton_first_delay: float = Field(default=15.0, ge=0)
     chat_skeleton_tokens: int = Field(default=90, ge=1)
     chat_skeleton_token_interval: float = Field(default=1.0, ge=0)
+
+    @property
+    def is_prod(self) -> bool:
+        return self.app_env == "prod"
+
+    # 공개 주소로 열리는 운영 서버가 위험한 설정으로 뜨지 않게 시작할 때 막음
+    @model_validator(mode="after")
+    def _check_prod(self) -> "Settings":
+        if self.is_prod and self.debug:
+            raise ValueError("APP_ENV=prod에서는 DEBUG를 켤 수 없음 (오류 응답에 내부 정보가 나감)")
+        return self
 
 
 @lru_cache
