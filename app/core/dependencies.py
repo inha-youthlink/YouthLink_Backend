@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from app.core.config import Settings, get_settings
-from app.core.errors import InvalidClientIdError
+from app.core.errors import ForbiddenOriginError, InvalidClientIdError
 from app.core.rate_limit import RateLimitedError, RateLimits
 from app.llm.client import LLMClient
 from app.pipeline.retrieval.base import Retriever
@@ -85,9 +85,23 @@ def verify_internal_key(
 ) -> None:
     if settings.internal_api_key is None:
         return
-    expected = settings.internal_api_key.get_secret_value().encode()
-    if not hmac.compare_digest((x_internal_key or "").encode(), expected):
+    if not _same_secret(x_internal_key, settings.internal_api_key.get_secret_value()):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "내부 API 키가 올바르지 않습니다.")
+
+
+def _same_secret(given: str | None, expected: str) -> bool:
+    return hmac.compare_digest((given or "").encode(), expected.encode())
+
+
+# Vercel을 거친 요청만 받음. 헤더는 Vercel 쪽에서 붙여야 해서 기본은 꺼 두고 SSE 검증 뒤에 켬
+def verify_origin(
+    x_origin_secret: Annotated[str | None, Header()] = None,
+    settings: Settings = Depends(get_settings),
+) -> None:
+    if settings.origin_secret is None:
+        return
+    if not _same_secret(x_origin_secret, settings.origin_secret.get_secret_value()):
+        raise ForbiddenOriginError
 
 
 # 횟수를 프로세스 전체에서 함께 세야 해서 하나만 만듦

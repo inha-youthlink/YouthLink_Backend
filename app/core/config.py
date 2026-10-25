@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     # Security
     # /internal 호출에 필요한 키. 비어 있으면 검사하지 않음 (로컬 개발·테스트)
     internal_api_key: SecretStr | None = None
+    # Vercel이 /api 요청에 붙여 보내는 비밀 헤더(X-Origin-Secret) 값. 비어 있으면 검사하지 않음
+    # 켜면 EC2 주소로 직접 오는 공개 API 요청을 막고, X-Forwarded-For도 꾸밀 수 없게 됨
+    origin_secret: SecretStr | None = None
+    # 큰 본문으로 메모리를 쓰게 하는 요청을 막음. 질문 1000자·이전 대화가 들어가도 충분한 크기
+    max_body_bytes: int = Field(default=256 * 1024, ge=0)
 
     # Rate limit (0이면 끔, 시연 전에 환경 변수로 조절)
     # 운영은 Vercel 뒤라 X-Forwarded-For의 첫 값을 접속 IP로 봄. 직접 접속하면 꾸밀 수 있어 하루 LLM 상한이 함께 막음
