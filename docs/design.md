@@ -111,7 +111,9 @@ YouthLink_Backend/
 │  │  ├─ config.py               # .env/환경 변수 → 설정 객체
 │  │  ├─ dependencies.py         # Depends 주입 함수, X-Client-Id 검사
 │  │  ├─ errors.py               # 공개 API 오류 형식 {code, message, details} (/api/*만)
-│  │  └─ sse.py                  # SSE 이벤트 형식, :ping 섞기
+│  │  ├─ sse.py                  # SSE 이벤트 형식, :ping 섞기
+│  │  ├─ rate_limit.py           # 요청 제한(IP·X-Client-Id, 분당), 하루 LLM 상한. 메모리에 셈
+│  │  └─ middleware.py           # 보안 헤더, 본문 크기 상한 (ASGI, SSE에 영향 없음)
 │  ├─ api/
 │  │  ├─ internal.py             # POST /internal/pipeline (저장 없음, 계속 유지)
 │  │  ├─ health.py               # GET /health
@@ -228,7 +230,7 @@ YouthLink_Backend/
 - 모든 엔드포인트와 LLM 호출은 async, 병렬 호출은 `asyncio.gather`
 - OpenAI 호출에 타임아웃과 재시도
 - 스트리밍은 `StreamingResponse`(SSE), 상태와 출처는 마지막 이벤트로
-- `/internal/*`은 외부에 노출하지 않음 (내부 네트워크 또는 API 키)
+- `/internal/*`은 공유 키(`X-Internal-Key` = `INTERNAL_API_KEY`)로 막음. 운영에서는 키가 없으면 서버가 시작하지 않음 (배포 준비 PR)
 - `/health`는 서버 생존 확인만. 외부 서비스(OpenAI) 확인은 넣지 않음
 
 ---

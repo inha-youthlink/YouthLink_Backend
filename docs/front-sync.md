@@ -1,6 +1,6 @@
 # 프론트 연동 현황 (임시 문서)
 
-- 기준: 2026-10-25, 백엔드 브랜치 `feat-public-api-sessions` (공개 API 1-1)
+- 기준: 2026-10-26, 백엔드 `main` (공개 API 1-1 #38, 배포 준비 PR)
 - 범위: 지금 백엔드 서버가 실제로 어디까지 되는지와 임시 형식. **약속(계약)은 [api-contract.md](api-contract.md)**, 이 문서는 구현 현황만 적는다
 - 계약 본문(4절)이 채워지고 실연동이 끝나면 이 문서는 지운다
 
@@ -19,6 +19,13 @@
 - 다른 사용자의 세션, 없는 세션, UUID가 아닌 세션 id는 모두 `404 SESSION_NOT_FOUND`
 - 오류는 `{code, message, details}`. 입력 검증 실패는 `400 VALIDATION_FAILED` + `details: [{field, reason}]` (`field`는 `profile.age`, `content`처럼 요청 필드 이름, `reason`은 한국어). 없는 경로 `404 NOT_FOUND`, 허용되지 않는 메서드 `405 METHOD_NOT_ALLOWED`, 그 외 `500 INTERNAL_ERROR`
 - 일시는 `+09:00` (예: `2026-10-25T20:38:26.355621+09:00`, 소수점 초가 붙을 수 있음)
+
+요청 제한과 보안 (배포 준비 PR, R8)
+- IP(`X-Forwarded-For` 첫 값)당 분당 300회(`/api/*` 전체), 채팅은 IP당 분당 60회 + `X-Client-Id`당 분당 10회. 넘으면 `429 RATE_LIMITED` + `Retry-After`(초)
+- 서버 전체 하루 LLM 1,000회. 넘으면 채팅이 `429 RATE_LIMITED`, `message`는 "오늘 이용량이 많아 채팅을 잠시 멈췄어요. 내일 다시 이용해 주세요." (다음 날 한국 자정까지의 `Retry-After`)
+- 본문 256KB 초과 `413 PAYLOAD_TOO_LARGE`
+- 모든 응답에 `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` (Step 4 CSP 요청)
+- 나중에 켤 수 있음: Vercel이 `/api` 요청에 비밀 헤더 `X-Origin-Secret`을 붙이면 EC2로 직접 오는 요청을 `403 FORBIDDEN`으로 막음. `vercel.json` rewrite만으로 요청 헤더를 붙일 수 있는지 프론트 확인이 필요함 (SSE 검증이 끝난 뒤)
 
 ## 2. SSE 검증 (R2)
 더미 `POST /api/health/stream`은 만들지 않았다. 채팅 API 뼈대로 검증한다.
@@ -53,6 +60,6 @@ curl -N -X POST <주소>/api/sessions/<id>/chat \
 | 카드 (`policies`) | `id`, `title`, `applyStart`, `applyEnd`, `status`, `regionLabel`, `organization`, `sourceUrl` | 계약 B5~B7 합의대로. `category`는 H1 뒤 |
 
 ## 4. 다음 (백엔드)
-- 서버 주소(R1): 배포 준비 PR 뒤 인프라 담당자가 띄우면 이 문서에 추가
+- 서버 주소(R1): 인프라 담당자가 띄우면 이 문서에 추가 (배포 방법은 [deploy.md](deploy.md))
 - 채팅 본구현: 실제 RAG 답변 스트리밍, `policies`를 첫 `token` 직전에 (B9), `clientMessageId` 멱등 처리(§5.3), 연결이 끊기면 생성 취소
 - 공개 API 2: 정책 검색·상세, 요약·추천, 스크랩
