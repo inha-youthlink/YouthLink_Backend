@@ -1,4 +1,5 @@
 from dataclasses import dataclass, fields
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -7,7 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.repositories.policy_repository import PolicyRecord, fetch_region_labels
-from app.schemas.chat import MessageItem, RoomItem
+from app.schemas.chat import MessageItem
 from app.schemas.pipeline import ConversationTurn, PolicyItem, PolicyRef, Profile
 from app.schemas.policy_info import today_kst
 
@@ -29,20 +30,22 @@ VALUES (
 )
 """)
 
-_GET_ROOM_SQL = text("""
-SELECT r.room_id, r.user_id,
+_ROOM_COLUMNS = """
+SELECT r.room_id, r.user_id, r.title, r.created_at,
        p.age, p.gender, p.region_code, p.marriage_status_code, p.annual_income,
        p.major_code, p.job_code, p.school_code, p.special_target_code
 FROM chat_room r
 LEFT JOIN chat_profile p ON p.room_id = r.room_id
+"""
+
+_GET_ROOM_SQL = text(_ROOM_COLUMNS + """
 WHERE r.room_id = :room_id
 """)
 
-_LIST_ROOMS_SQL = text("""
-SELECT room_id, title, created_at, updated_at
-FROM chat_room
-WHERE user_id = :user_id
-ORDER BY updated_at DESC
+# 계약(§4.1)이 세션 목록을 만든 순서로 정함
+_LIST_ROOMS_SQL = text(_ROOM_COLUMNS + """
+WHERE r.user_id = :user_id
+ORDER BY r.created_at DESC
 """)
 
 # 질문과 답변은 한 트랜잭션에 저장되어 created_at이 같으므로 message_id로 순서를 보장함
@@ -119,6 +122,9 @@ WHERE room_id = :room_id
 class RoomRecord:
     room_id: UUID
     user_id: str
+    # 첫 질문 전에는 비어 있음 (save_turn에서 채움)
+    title: str | None
+    created_at: datetime
     profile: Profile
 
 
@@ -138,15 +144,12 @@ class ChatRepository:
         async with self._session_factory() as session:
             result = await session.execute(_GET_ROOM_SQL, {"room_id": room_id})
             row = result.mappings().one_or_none()
-        if row is None:
-            return None
-        profile = Profile(**{field: row[field] for field in Profile.model_fields})
-        return RoomRecord(room_id=row["room_id"], user_id=row["user_id"], profile=profile)
+        return None if row is None else _room_record(row)
 
-    async def list_rooms(self, user_id: str) -> list[RoomItem]:
+    async def list_rooms(self, user_id: str) -> list[RoomRecord]:
         async with self._session_factory() as session:
             result = await session.execute(_LIST_ROOMS_SQL, {"user_id": user_id})
-            return [RoomItem.model_validate(row) for row in result.mappings()]
+            return [_room_record(row) for row in result.mappings()]
 
     async def list_messages(self, room_id: UUID) -> list[MessageItem]:
         async with self._session_factory() as session:
@@ -247,3 +250,13 @@ class ChatRepository:
                 ])
             await session.execute(_TOUCH_ROOM_SQL, {"room_id": room_id, "title": room_title})
         return answer_id
+
+
+def _room_record(row: Any) -> RoomRecord:
+    return RoomRecord(
+        room_id=row["room_id"],
+        user_id=row["user_id"],
+        title=row["title"],
+        created_at=row["created_at"],
+        profile=Profile(**{field: row[field] for field in Profile.model_fields}),
+    )

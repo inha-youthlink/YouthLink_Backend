@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     # 분석은 실패해도 원래 질문으로 진행하므로 답변 호출보다 짧게 두고 재시도하지 않음
     analysis_timeout: float = Field(default=10.0, gt=0)
 
+    # Streaming
+    # 프록시가 조용한 연결을 끊지 않게 보내는 간격 (계약 R4)
+    sse_ping_interval: float = Field(default=15.0, gt=0)
+    # 채팅 뼈대의 대기·길이 (계약 §5.4 검증 조건). 연결을 오래 잡아 검증이 끝나면 줄임
+    chat_skeleton_first_delay: float = Field(default=15.0, ge=0)
+    chat_skeleton_tokens: int = Field(default=90, ge=1)
+    chat_skeleton_token_interval: float = Field(default=1.0, ge=0)
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,8 +1,11 @@
 from dataclasses import dataclass
+from typing import Annotated
+from uuid import UUID
 
-from fastapi import Depends, Request
+from fastapi import Depends, Header, Request
 
 from app.core.config import Settings, get_settings
+from app.core.errors import InvalidClientIdError
 from app.llm.client import LLMClient
 from app.pipeline.retrieval.base import Retriever
 from app.repositories.chat_repository import ChatRepository
@@ -54,3 +57,18 @@ def get_pipeline_deps(
         policy_repository=policy_repository,
         common_code_repository=common_code_repository,
     )
+
+
+# 헤더가 없을 때도 검증 오류가 아니라 계약의 INVALID_CLIENT_ID로 응답하려고 직접 검사함
+# 같은 ID를 대소문자·하이픈 없는 형태로 보내도 한 사용자로 묶이게 표준 형태로 저장함
+def get_client_id(x_client_id: Annotated[str | None, Header()] = None) -> str:
+    try:
+        client_id = UUID(x_client_id or "")
+    except ValueError:
+        raise InvalidClientIdError from None
+    if client_id.version != 4:
+        raise InvalidClientIdError
+    return str(client_id)
+
+
+ClientId = Annotated[str, Depends(get_client_id)]

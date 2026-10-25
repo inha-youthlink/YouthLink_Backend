@@ -69,10 +69,11 @@ uv run pytest
 |---|---|---|
 | GET | `/health` | 서버 상태 확인 |
 | POST | `/internal/pipeline` | 프로필 + 질문 → 추천 정책 + 답변 + trace (저장 없음) |
-| POST | `/api/rooms` | 채팅방 생성 (프로필은 이때만 받음) |
-| GET | `/api/rooms` | 사용자의 채팅방 목록 |
-| POST | `/api/rooms/{room_id}/messages` | 질문 전송 → 답변 + 추천 정책 (대화 저장) |
-| GET | `/api/rooms/{room_id}/messages` | 대화 기록 조회 |
+| POST | `/api/sessions` | 세션(채팅방) 생성 (프로필은 이때만 받음) |
+| GET | `/api/sessions` | 내 세션 목록 (만든 시각 내림차순) |
+| GET | `/api/sessions/{session_id}` | 세션 하나 |
+| GET | `/api/sessions/{session_id}/messages` | 메시지 이력 (답변의 카드 포함) |
+| POST | `/api/sessions/{session_id}/chat` | 질문 → 답변 SSE 스트리밍 (지금은 RAG 없는 뼈대) |
 
 ### `POST /internal/pipeline`
 
@@ -118,21 +119,21 @@ RAG 평가·디버깅용입니다. 근거 원문 같은 내부 정보는 debug �
 - `conditions`, `retrieved_chunks`: 검색 핸들러일 때만 있습니다. `conditions`는 1차 필터 조건(`lines`, 항목마다 질문·프로필 출처), 필터 후 정책 수(`filtered_policy_count`, 조건이 없으면 `null`)
 - `retrieved_chunks`: 검색된 청크 목록 (`chunk_id`, `policy_no`, `chunk_type`, `chunk_index`, `score`, `content`), 검색 점수순
 
-### 채팅 API (`/api/rooms`)
+### 공개 API (`/api/sessions`)
 
-대화를 저장하는 API입니다. 지금은 Swagger와 확인 스크립트로 사용하며, 공개 API의 세션·채팅(`/api/sessions`)으로 대체할 예정입니다.
+브라우저(프론트)가 부르는 API입니다. 형식은 [공개 API 계약](docs/api-contract.md)과 프론트 계약(`YouthLink_Front/spec/api-contract.md`)을 따릅니다.
 
 ```
-1. POST /api/rooms                     {"user_id": "u1", "profile": {"age": 24}}  → 201 {"room_id": "..."}
-2. POST /api/rooms/{room_id}/messages  {"user_id": "u1", "question": "..."}       → {"message_id", "answer", "policies"}
-3. GET  /api/rooms/{room_id}/messages?user_id=u1                                  → {"messages": [...]}
+1. POST /api/sessions                  {"profile": {"age": 24}}                    → 201 {"id", "title", "profile", "createdAt"}
+2. POST /api/sessions/{id}/chat        {"clientMessageId": "<uuid>", "content": "..."} → SSE token… policies → done
+3. GET  /api/sessions/{id}/messages                                                 → [{"id", "clientMessageId", "role", "content", "policies", "createdAt"}]
 ```
 
-- 채팅방 프로필은 생성할 때만 받고 이후 수정하지 않습니다. 조건이 바뀌면 새 채팅방을 만듭니다.
-- `user_id`가 채팅방 소유자와 다르거나 채팅방이 없으면 404입니다. 서버는 인증하지 않고 `user_id`를 그대로 믿습니다 (공개 API에서는 `X-Client-Id`).
-- 질문과 답변은 답변까지 성공한 뒤 한 번에 저장합니다. 실패하면(503) 아무것도 저장하지 않습니다.
-- `policies`는 `/internal/pipeline`과 같은 형식이고, 기록 조회에서도 같은 형식으로 복원됩니다. 신청 상태는 조회 시점 기준으로 다시 계산합니다.
-- 6주차에는 대화를 저장만 하고, 이전 대화를 답변에 활용하는 것은 7주차부터입니다.
+- 모든 요청에 `X-Client-Id` 헤더(UUID v4)가 필요합니다. 없거나 형식이 틀리면 `400 INVALID_CLIENT_ID`, 다른 사용자의 세션이나 없는 세션은 `404 SESSION_NOT_FOUND`입니다.
+- 오류는 `{code, message, details}` 형식입니다. 입력 검증 실패는 `400 VALIDATION_FAILED`이고 `details`에 필드별 이유가 들어갑니다. (`/internal/*`은 FastAPI 기본 형식 그대로)
+- 세션 프로필은 생성할 때만 받고 이후 수정하지 않습니다. 지금은 `/internal/pipeline`과 같은 DB 코드 형식이며, 프론트 enum 형식은 계약 합의 뒤에 바뀝니다.
+- 채팅은 지금 **SSE 뼈대**입니다. RAG 없이 계약 §5.4 조건(15초 대기, 1초 간격 `token` 90개, 15초마다 `:ping`, `policies`, `done`)으로 고정 문장을 보내고 저장하지 않습니다. 대기·길이는 `CHAT_SKELETON_*` 설정으로 바꿀 수 있습니다.
+- 세션·입력 오류는 스트림을 시작하기 전에 JSON으로 응답합니다. `curl -N`으로 보면 이벤트가 오는 대로 찍힙니다.
 - 채팅 테이블은 ETL 저장소의 마이그레이션 008이 적용된 DB가 필요합니다.
 
 ## 디렉터리 구조
@@ -140,12 +141,12 @@ RAG 평가·디버깅용입니다. 근거 원문 같은 내부 정보는 debug �
 ```
 app/
 ├─ main.py         # 앱 생성, lifespan, 라우터 등록
-├─ api/            # 라우터 (health, internal, rooms)
-├─ core/           # 설정, 의존성 주입
+├─ api/            # 라우터 (health, internal, sessions)
+├─ core/           # 설정, 의존성 주입, 공개 API 오류 형식, SSE
 ├─ schemas/        # 요청·응답 스키마
 ├─ llm/            # OpenAI 호출 (임베딩, 답변 생성)
 ├─ pipeline/       # RAG 처리 흐름 (검색, 정책 묶기, 답변 생성). DB에 쓰지 않음
-├─ services/       # 채팅 처리 흐름 (소유 확인 → 파이프라인 → 저장)
+├─ services/       # 채팅 처리 흐름 (소유 확인 → 파이프라인 → 저장), 채팅 SSE 뼈대
 ├─ repositories/   # DB 접근 (정책 테이블은 읽기, 채팅 테이블은 읽기·쓰기)
 └─ prompts/        # 프롬프트 파일 (버전별)
 docs/              # 설계 문서, 주차별 작업 기록
