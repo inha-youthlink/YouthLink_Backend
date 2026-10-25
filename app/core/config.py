@@ -4,6 +4,9 @@ from typing import Literal
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# 추측으로 맞힐 수 없는 길이. secrets.token_urlsafe(32)는 43자
+INTERNAL_KEY_MIN_CHARS = 32
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -20,6 +23,10 @@ class Settings(BaseSettings):
     app_name: str = "YouthLink Backend"
     app_env: Literal["local", "dev", "prod"] = "local"
     debug: bool = False
+
+    # Security
+    # /internal 호출에 필요한 키. 비어 있으면 검사하지 않음 (로컬 개발·테스트)
+    internal_api_key: SecretStr | None = None
 
     # OpenAI
     openai_api_key: SecretStr
@@ -61,8 +68,15 @@ class Settings(BaseSettings):
     # 공개 주소로 열리는 운영 서버가 위험한 설정으로 뜨지 않게 시작할 때 막음
     @model_validator(mode="after")
     def _check_prod(self) -> "Settings":
-        if self.is_prod and self.debug:
+        if not self.is_prod:
+            return self
+        if self.debug:
             raise ValueError("APP_ENV=prod에서는 DEBUG를 켤 수 없음 (오류 응답에 내부 정보가 나감)")
+        key = self.internal_api_key.get_secret_value() if self.internal_api_key else ""
+        if len(key) < INTERNAL_KEY_MIN_CHARS:
+            raise ValueError(
+                f"APP_ENV=prod에는 {INTERNAL_KEY_MIN_CHARS}자 이상의 INTERNAL_API_KEY가 필요함 (/internal이 LLM을 부름)"
+            )
         return self
 
 

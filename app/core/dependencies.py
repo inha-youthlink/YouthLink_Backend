@@ -1,8 +1,9 @@
+import hmac
 from dataclasses import dataclass
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Header, HTTPException, Request, status
 
 from app.core.config import Settings, get_settings
 from app.core.errors import InvalidClientIdError
@@ -72,3 +73,16 @@ def get_client_id(x_client_id: Annotated[str | None, Header()] = None) -> str:
 
 
 ClientId = Annotated[str, Depends(get_client_id)]
+
+
+# /internal은 평가 서버 전용이라 FastAPI 기본 오류 형식을 그대로 씀
+# 비교 시간으로 키를 한 글자씩 알아내지 못하게 compare_digest로 비교함
+def verify_internal_key(
+    x_internal_key: Annotated[str | None, Header()] = None,
+    settings: Settings = Depends(get_settings),
+) -> None:
+    if settings.internal_api_key is None:
+        return
+    expected = settings.internal_api_key.get_secret_value().encode()
+    if not hmac.compare_digest((x_internal_key or "").encode(), expected):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "내부 API 키가 올바르지 않습니다.")
