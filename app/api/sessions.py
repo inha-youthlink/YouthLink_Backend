@@ -5,8 +5,16 @@ from fastapi import APIRouter, Depends, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.core.config import Settings, get_settings
-from app.core.dependencies import ClientId, PipelineDeps, get_chat_repository, get_pipeline_deps
+from app.core.dependencies import (
+    ClientId,
+    PipelineDeps,
+    get_chat_repository,
+    get_pipeline_deps,
+    get_rate_limits,
+    limit_chat_requests,
+)
 from app.core.errors import SessionNotFoundError
+from app.core.rate_limit import RateLimits
 from app.core.sse import SSE_HEADERS, with_pings
 from app.repositories.chat_repository import ChatRepository
 from app.schemas.public import ErrorResponse
@@ -74,7 +82,12 @@ async def list_messages(session_id: SessionId, client_id: ClientId, service: Ser
 @router.post(
     "/{session_id}/chat",
     response_class=StreamingResponse,
-    responses={status.HTTP_200_OK: {"content": {"text/event-stream": {}}}, **_NOT_FOUND},
+    responses={
+        status.HTTP_200_OK: {"content": {"text/event-stream": {}}},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": ErrorResponse},
+        **_NOT_FOUND,
+    },
+    dependencies=[Depends(limit_chat_requests)],
 )
 async def chat(
     session_id: SessionId,
@@ -82,8 +95,11 @@ async def chat(
     client_id: ClientId,
     service: Service,
     settings: Annotated[Settings, Depends(get_settings)],
+    limits: Annotated[RateLimits, Depends(get_rate_limits)],
 ) -> StreamingResponse:
     await service.get_session(session_id, client_id)
+    # 뼈대는 LLM을 부르지 않지만 본구현과 같은 자리에서 미리 셈
+    limits.use_llm()
     return StreamingResponse(
         with_pings(skeleton_events(request.client_message_id, settings), settings.sse_ping_interval),
         media_type="text/event-stream",

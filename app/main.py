@@ -1,11 +1,12 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api import health, internal, sessions
 from app.core.config import get_settings
+from app.core.dependencies import limit_public_requests
 from app.core.errors import register_error_handlers
 from app.llm.client import LLMClient
 from app.pipeline.retrieval.factory import create_retriever
@@ -58,4 +59,5 @@ register_error_handlers(app)
 
 app.include_router(health.router)
 app.include_router(internal.router)
-app.include_router(sessions.router)
+# 공개 라우터는 여기서 IP 요청 제한을 함께 붙임. /internal(평가 서버)과 /health(헬스 체크)는 제외
+app.include_router(sessions.router, dependencies=[Depends(limit_public_requests)])

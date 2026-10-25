@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     # /internal 호출에 필요한 키. 비어 있으면 검사하지 않음 (로컬 개발·테스트)
     internal_api_key: SecretStr | None = None
 
+    # Rate limit (0이면 끔, 시연 전에 환경 변수로 조절)
+    # 운영은 Vercel 뒤라 X-Forwarded-For의 첫 값을 접속 IP로 봄. 직접 접속하면 꾸밀 수 있어 하루 LLM 상한이 함께 막음
+    trust_proxy_headers: bool = True
+    # IP 기준은 시연장처럼 여러 사람이 같은 와이파이(같은 IP)를 써도 걸리지 않을 값. 한 사람은 X-Client-Id 기준이 막음
+    rate_limit_per_minute: int = Field(default=300, ge=0)
+    chat_rate_limit_per_minute: int = Field(default=60, ge=0)
+    chat_client_rate_limit_per_minute: int = Field(default=10, ge=0)
+    # 같은 와이파이의 여러 사람이 써도 시연 하루에 닿지 않을 값. 넘으면 다음 날(한국 자정)까지 LLM 호출을 막음
+    llm_daily_limit: int = Field(default=1000, ge=0)
+
     # OpenAI
     openai_api_key: SecretStr
     openai_timeout: float = 30.0
