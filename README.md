@@ -4,7 +4,8 @@ YouthLink RAG 기반 청년 지원 챗봇 및 신청 가이드 시스템의 백�
 
 - FastAPI 서버 하나가 프론트용 공개 API, 채팅 저장, RAG 파이프라인을 맡습니다. 로그인은 없고 브라우저별 익명 ID로 사용자를 구분합니다 (Spring은 두지 않기로 결정, [설계 문서](docs/design.md) 15절)
 - 정책 데이터와 임베딩은 ETL 서버가 적재하고, 평가 서버는 내부 API(`/internal/pipeline`)로 RAG 성능을 평가합니다
-- 공개 API(`/api/sessions` 등, 프론트 계약 기준)는 9~10주차에 구현합니다 ([8주차 계획](docs/weekly/week08.md) 7절)
+- 공개 API(`/api/sessions` 등, 프론트 계약 기준)는 세션·채팅 SSE 뼈대까지 구현했고, 나머지는 9~10주차에 구현합니다 ([8주차 계획](docs/weekly/week08.md) 7절, [프론트 연동 현황](docs/front-sync.md))
+- 배포는 Docker 컨테이너 하나입니다 ([배포 안내](docs/deploy.md))
 
 ## 설계 및 작업 기록
 
@@ -52,6 +53,18 @@ uv run uvicorn app.main:app --reload
 
 - API 문서 (Swagger UI): http://127.0.0.1:8000/docs
 - API 문서 (ReDoc): http://127.0.0.1:8000/redoc
+- 운영(`APP_ENV=prod`)에서는 API 문서가 꺼집니다
+
+### Docker로 실행
+
+```bash
+docker build -t youthlink-backend .
+docker run --env-file .env -p 8000:8000 youthlink-backend
+```
+
+- `.env`의 `DATABASE_URL`이 `localhost`면 컨테이너 안에서는 `host.docker.internal`로 바꿔야 합니다.
+- env 파일에는 값 뒤에 주석을 쓰지 않습니다. Docker는 `# 메모`까지 값으로 읽습니다 (`.env.example` 형식 참고).
+- 운영 설정·보안·요청 제한은 [배포 안내](docs/deploy.md)를 참고하세요.
 
 ### 테스트
 
@@ -101,6 +114,7 @@ uv run pytest
   - `region_label`: 정책 지역 표시 문구 ("서울특별시 강남구", "경기도 5곳", "전국")
   - `application_url`: 원본 신청 링크를 정리한 값(`https://` 보정, 주소가 아닌 값은 `null`). 절반 이상이 사이트 첫 화면이라 버튼 문구는 "관련 사이트"처럼 중립적으로 쓰는 것을 권장합니다
 - 요청 검증 실패는 422, OpenAI·DB 호출 실패는 503을 반환합니다.
+- 서버에 `INTERNAL_API_KEY`가 설정돼 있으면 `X-Internal-Key` 헤더에 같은 값을 보내야 합니다 (아니면 401). 로컬에서 비워 두면 검사하지 않습니다. 운영(`APP_ENV=prod`)에서는 필수입니다.
 - 자세한 형식은 `/docs`와 [5주차 작업 기록](docs/weekly/week05.md)을 참고하세요. `trace` 구성은 아래 debug 모드 기준입니다.
 
 #### debug 모드 (`?debug=true`)
@@ -134,6 +148,8 @@ RAG 평가·디버깅용입니다. 근거 원문 같은 내부 정보는 debug �
 - 세션 프로필은 생성할 때만 받고 이후 수정하지 않습니다. 지금은 `/internal/pipeline`과 같은 DB 코드 형식이며, 프론트 enum 형식은 계약 합의 뒤에 바뀝니다.
 - 채팅은 지금 **SSE 뼈대**입니다. RAG 없이 계약 §5.4 조건(15초 대기, 1초 간격 `token` 90개, 15초마다 `:ping`, `policies`, `done`)으로 고정 문장을 보내고 저장하지 않습니다. 대기·길이는 `CHAT_SKELETON_*` 설정으로 바꿀 수 있습니다.
 - 세션·입력 오류는 스트림을 시작하기 전에 JSON으로 응답합니다. `curl -N`으로 보면 이벤트가 오는 대로 찍힙니다.
+- 요청 제한: IP당 분당 300회, 채팅은 IP당 분당 60회 + `X-Client-Id`당 분당 10회, 서버 전체 하루 LLM 1,000회. 넘으면 `429 RATE_LIMITED` + `Retry-After`. 값은 `.env`로 바꾸고 `0`이면 끕니다.
+- 본문이 256KB를 넘으면 `413 PAYLOAD_TOO_LARGE`입니다.
 - 채팅 테이블은 ETL 저장소의 마이그레이션 008이 적용된 DB가 필요합니다.
 
 ## 디렉터리 구조
@@ -142,7 +158,7 @@ RAG 평가·디버깅용입니다. 근거 원문 같은 내부 정보는 debug �
 app/
 ├─ main.py         # 앱 생성, lifespan, 라우터 등록
 ├─ api/            # 라우터 (health, internal, sessions)
-├─ core/           # 설정, 의존성 주입, 공개 API 오류 형식, SSE
+├─ core/           # 설정, 의존성 주입, 공개 API 오류 형식, SSE, 요청 제한, 보안 미들웨어
 ├─ schemas/        # 요청·응답 스키마
 ├─ llm/            # OpenAI 호출 (임베딩, 답변 생성)
 ├─ pipeline/       # RAG 처리 흐름 (검색, 정책 묶기, 답변 생성). DB에 쓰지 않음

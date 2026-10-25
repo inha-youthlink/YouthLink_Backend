@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from openai import OpenAIError
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.dependencies import PipelineDeps, get_pipeline_deps
+from app.core.dependencies import PipelineDeps, get_pipeline_deps, verify_internal_key
 from app.pipeline.runner import run_pipeline
 from app.schemas.pipeline import PUBLIC_TRACE_KEYS, PipelineInput, PipelineOutput
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/internal", tags=["internal"])
+router = APIRouter(prefix="/internal", tags=["internal"], dependencies=[Depends(verify_internal_key)])
 
 
 @router.post("/pipeline", response_model=PipelineOutput)

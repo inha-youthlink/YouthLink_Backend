@@ -54,6 +54,11 @@ class InvalidClientIdError(ApiError):
         super().__init__(status.HTTP_400_BAD_REQUEST, "INVALID_CLIENT_ID", "사용자 식별 정보가 올바르지 않습니다.")
 
 
+class ForbiddenOriginError(ApiError):
+    def __init__(self) -> None:
+        super().__init__(status.HTTP_403_FORBIDDEN, "FORBIDDEN", "허용되지 않은 접근입니다.")
+
+
 # 다른 사용자의 세션이 있는지 숨기려고 없는 경우와 같은 응답을 씀
 class SessionNotFoundError(ApiError):
     def __init__(self) -> None:
@@ -68,9 +73,12 @@ def register_error_handlers(app: FastAPI) -> None:
 
 
 # 평가 서버가 /internal의 기존 오류 형식을 쓰고 있어 공개 경로에만 계약 형식을 적용함
-def _is_public(request: Request) -> bool:
-    path = request.url.path
+def is_public_path(path: str) -> bool:
     return path == PUBLIC_PREFIX or path.startswith(PUBLIC_PREFIX + "/")
+
+
+def _is_public(request: Request) -> bool:
+    return is_public_path(request.url.path)
 
 
 def _error_response(error: ApiError) -> JSONResponse:

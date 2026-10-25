@@ -9,10 +9,28 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.core.config import get_settings
+from app.core.dependencies import get_rate_limits
+from app.core.rate_limit import RateLimits
+from app.main import app
 from app.repositories.chat_repository import ChatRepository
 
 SQL_DIR = Path(__file__).parent / "sql"
 TEST_POLICY_NOS = ("TEST-POLICY-01", "TEST-POLICY-02", "TEST-POLICY-03")
+
+
+# 횟수는 프로세스 전체에서 공유돼 테스트끼리 합쳐 세지 않게 테스트마다 제한 없는 새 인스턴스를 씀
+@pytest.fixture(autouse=True)
+def no_rate_limits() -> Iterator[None]:
+    unlimited = get_settings().model_copy(update={
+        "rate_limit_per_minute": 0,
+        "chat_rate_limit_per_minute": 0,
+        "chat_client_rate_limit_per_minute": 0,
+        "llm_daily_limit": 0,
+    })
+    app.dependency_overrides[get_rate_limits] = lambda: RateLimits(unlimited)
+    yield
+    app.dependency_overrides.pop(get_rate_limits, None)
 
 
 class DatabaseTestSettings(BaseSettings):

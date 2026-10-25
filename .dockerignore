@@ -1,0 +1,23 @@
+# 비밀 값은 이미지에 넣지 않고 실행할 때 환경 변수로 받음
+.env
+.env.*
+!.env.example
+
+# 실행에 필요 없는 것
+.git/
+.github/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+tests/
+notes/
+docs/
+
+# 개인 설정
+.idea/
+.vscode/
+.claude/
+CLAUDE.local.md
+.DS_Store
