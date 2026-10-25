@@ -109,16 +109,21 @@ YouthLink_Backend/
 │  ├─ main.py                    # 앱 생성, 라우터 등록, lifespan
 │  ├─ core/
 │  │  ├─ config.py               # .env/환경 변수 → 설정 객체
-│  │  └─ dependencies.py         # Depends 주입 함수
+│  │  ├─ dependencies.py         # Depends 주입 함수, X-Client-Id 검사
+│  │  ├─ errors.py               # 공개 API 오류 형식 {code, message, details} (/api/*만)
+│  │  └─ sse.py                  # SSE 이벤트 형식, :ping 섞기
 │  ├─ api/
 │  │  ├─ internal.py             # POST /internal/pipeline (저장 없음, 계속 유지)
 │  │  ├─ health.py               # GET /health
-│  │  ├─ rooms.py                # 채팅방·메시지 API (6주차, 공개 API로 대체 예정)
-│  │  └─ public/                 [+ 공개 API] 프론트 계약: 세션, 채팅 SSE, 정책, 스크랩, 가이드
+│  │  ├─ sessions.py             # 공개 API: 세션 4개 + 채팅 SSE (6주차 rooms.py를 대체)
+│  │  ├─ policies.py             [+ 공개 API 2] 정책 검색·상세
+│  │  └─ scraps.py               [+ 공개 API 2] 스크랩
 │  ├─ schemas/
 │  │  ├─ pipeline.py             # Profile, PipelineInput/Output, Chunk, PolicyItem, PUBLIC_TRACE_KEYS
 │  │  ├─ analysis.py             [+ 7주차] LLM 구조화 출력
-│  │  └─ chat.py                 # 채팅 API 요청·응답
+│  │  ├─ chat.py                 # 채팅 저장 기록(MessageItem), 질문 길이 상한
+│  │  ├─ public.py               # 공개 API 공통: camelCase, +09:00 일시, 오류 응답
+│  │  └─ session.py              # 공개 API 세션·메시지·카드(PolicySummary)·채팅 요청
 │  ├─ llm/
 │  │  └─ client.py               # embed(), chat() — OpenAI 호출의 유일한 통로
 │  ├─ pipeline/                  # RAG 로직 (DB 쓰기 없음)
@@ -151,7 +156,8 @@ YouthLink_Backend/
 │  │  ├─ grouping.py             # 청크 → 정책 단위 묶기
 │  │  └─ generator.py            # 프롬프트 조립 + 답변 생성
 │  ├─ services/
-│  │  └─ chat_service.py         # 소유 확인 → 파이프라인 → 한 트랜잭션 저장
+│  │  ├─ chat_service.py         # 소유 확인 → 파이프라인 → 한 트랜잭션 저장, 세션 응답 변환
+│  │  └─ chat_skeleton.py        # 채팅 SSE 뼈대 (RAG 없이 고정 문장, 본구현에서 대체)
 │  ├─ repositories/
 │  │  ├─ vector_repository.py    # policy_chunk 벡터 검색 (읽기)
 │  │  ├─ policy_repository.py    # policy 조회 (읽기)
@@ -237,38 +243,9 @@ POST /internal/pipeline   PipelineInput → PipelineOutput (저장 없음)
 - 응답 형식은 필드 추가만 자유롭게
 - `?debug=true` (6주차): trace에 `contexts`(LLM에 넘긴 정책별 근거 블록)와 `retrieved_chunks`(청크 본문 포함)를 추가. 기본 요청은 API 계층의 허용 목록으로 가벼운 키만 반환 (`latency_ms`, `tokens`, `chat_model`, `retriever`, `top_k`, `prompt_version`, `embedding_model`). RAG 평가 서버는 항상 debug로 호출
 
-### 4-2. 채팅 API (6주차, 공개 API로 대체 예정)
-```
-POST /api/rooms                              채팅방 생성 (user_id, profile) → 201, room_id
-GET  /api/rooms?user_id=...                  사용자의 채팅방 목록 (최근 대화 순)
-GET  /api/rooms/{room_id}/messages?user_id=  대화 기록 조회
-POST /api/rooms/{room_id}/messages           질문 전송 (user_id, question)
-```
-질문 전송 응답 (6주차 확정):
-```json
-{
-  "message_id": 14,
-  "answer": "...",
-  "policies": [
-    { "policy_no": "...", "policy_name": "...", "application_start_date": "2026-10-01",
-      "application_end_date": "2026-10-31", "application_url": "...", "score": 0.82 }
-  ]
-}
-```
-대화 기록 조회 응답:
-```json
-{
-  "messages": [
-    { "message_id": 13, "role": "user", "content": "...", "created_at": "...", "policies": [] },
-    { "message_id": 14, "role": "assistant", "content": "...", "created_at": "...", "policies": [ ... ] }
-  ]
-}
-```
-- `policies`는 `/internal/pipeline`과 같은 `PolicyItem`. 배열 순서가 카드 순서이고 `message_policy_ref.display_order`(1부터)로 저장된다
-- 기록 조회의 `policies`는 저장된 순서로 복원하되, 이름·날짜·URL은 조회 시점의 `policy` 값이다
-- 프로필은 채팅방 생성 때만 받는다 (5-3). trace와 `metadata`는 응답에 넣지 않는다
-- 오류: 없는 채팅방·다른 사용자의 채팅방 404 (구분하지 않음), 요청 검증 422, OpenAI·DB 실패 503
-- Swagger와 테스트 스크립트로 확인하는 용도로 만들었고, 4-3 공개 API의 세션·채팅으로 대체한다 (두 벌을 유지하지 않음)
+### 4-2. 채팅 API (6주차, 8주차에 삭제)
+- 6주차의 `/api/rooms`(`user_id` 쿼리·본문, 응답 한 번에 반환)는 공개 API 1-1에서 4-3의 `/api/sessions`로 대체하고 삭제했다 (두 벌을 유지하지 않음)
+- 질문 → 파이프라인 → 저장 흐름(`ChatService.send_message`)은 남겨 두고 본구현에서 `/chat`에 연결한다
 
 ### 4-3. 공개 API (프론트 계약 기준, 8주차 결정)
 - 기준: 프론트 저장소의 `spec/api-contract.md` (v0.3, 합의 전). 경로·enum·오류 형식은 계약을 따르고, 백엔드가 DB 코드로 변환한다 (지역 `SEOUL` → 시군구 코드, 학력 등 enum → `common_code`, 연소득 만 원 → 원)
@@ -285,7 +262,12 @@ POST /api/rooms/{room_id}/messages           질문 전송 (user_id, question)
 
 - 공통: 오류 형식 `{code, message, details}`, 요청 제한(IP + `X-Client-Id`, 특히 LLM을 부르는 API, `429`), `GET /sessions`에 `Cache-Control: no-store`
 - SSE의 `policies`는 답변 첫 줄(`[소개: …]`)로 카드가 정해지는 즉시 본문보다 먼저 보낸다 (12절, 응답 속도)
-- 프론트와 협의할 것(카드 신청 상태, 카테고리 대응, 정책 지역 표시, 세션 제목, 상세 필드 등): [weekly/week08.md](weekly/week08.md) 7절
+- 프론트와 협의할 것(카드 신청 상태, 카테고리 대응, 정책 지역 표시, 세션 제목, 상세 필드 등): [weekly/week08.md](weekly/week08.md) 7절, 백엔드 답변은 [api-contract.md](api-contract.md)
+
+**구현 상태** (공개 API 1-1)
+- 됨: 공통 규칙(`X-Client-Id` UUID v4, 오류 형식, 422 → `400 VALIDATION_FAILED`, 일시 `+09:00`), 세션 4개, 채팅 SSE 뼈대(RAG 없이 계약 §5.4 조건, 세션·입력 오류는 시작 전에 JSON)
+- 임시: 프로필은 DB 코드(`Profile`, snake_case), 세션 `category` 없음(B3), 카드는 계약 이름(`id`, `title`, `applyStart`, `applyEnd`, `status`, `regionLabel`, `organization`, `sourceUrl`)에 `category` 없음(H1). 첫 질문 전 제목은 "새 대화", 세션 목록은 만든 시각 내림차순
+- 본구현(1-2): 프로필 enum 변환, 채팅에 RAG 연결, `clientMessageId` 멱등 처리(ETL 마이그레이션), 연결 끊김 시 생성 취소
 
 ---
 
