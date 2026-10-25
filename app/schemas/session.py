@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import Field
 
+from app.schemas.chat import QUESTION_MAX_CHARS
 from app.schemas.pipeline import PolicyItem, Profile
 from app.schemas.policy_info import ApplicationStatus
 from app.schemas.public import KstDateTime, PublicModel
@@ -54,3 +55,9 @@ class Message(PublicModel):
     content: str
     policies: list[PolicySummary] | None
     created_at: KstDateTime
+
+
+class ChatRequest(PublicModel):
+    # 재시도 때 같은 값을 보내는 멱등 키 (계약 §5.3). 뼈대는 형식만 검사함
+    client_message_id: UUID
+    content: str = Field(min_length=1, max_length=QUESTION_MAX_CHARS)

@@ -2,13 +2,17 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
+from fastapi.responses import StreamingResponse
 
+from app.core.config import Settings, get_settings
 from app.core.dependencies import ClientId, PipelineDeps, get_chat_repository, get_pipeline_deps
 from app.core.errors import SessionNotFoundError
+from app.core.sse import SSE_HEADERS, with_pings
 from app.repositories.chat_repository import ChatRepository
 from app.schemas.public import ErrorResponse
-from app.schemas.session import ChatSession, CreateSessionRequest, Message
+from app.schemas.session import ChatRequest, ChatSession, CreateSessionRequest, Message
 from app.services.chat_service import ChatService
+from app.services.chat_skeleton import skeleton_events
 
 
 # 응답이 X-Client-Id마다 달라 공용 캐시가 다른 사용자의 목록을 돌려주지 않게 막음
@@ -64,3 +68,24 @@ async def get_session(session_id: SessionId, client_id: ClientId, service: Servi
 @router.get("/{session_id}/messages", responses=_NOT_FOUND)
 async def list_messages(session_id: SessionId, client_id: ClientId, service: Service) -> list[Message]:
     return await service.list_messages(session_id, client_id)
+
+
+# 스트림을 시작하면 상태 코드를 바꿀 수 없어 세션·입력 오류는 시작 전에 JSON으로 응답함 (계약 §5.1)
+@router.post(
+    "/{session_id}/chat",
+    response_class=StreamingResponse,
+    responses={status.HTTP_200_OK: {"content": {"text/event-stream": {}}}, **_NOT_FOUND},
+)
+async def chat(
+    session_id: SessionId,
+    request: ChatRequest,
+    client_id: ClientId,
+    service: Service,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> StreamingResponse:
+    await service.get_session(session_id, client_id)
+    return StreamingResponse(
+        with_pings(skeleton_events(request.client_message_id, settings), settings.sse_ping_interval),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
