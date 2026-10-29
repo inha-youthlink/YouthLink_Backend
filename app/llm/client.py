@@ -1,6 +1,7 @@
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 from pydantic import BaseModel
 
 from app.core.config import Settings
@@ -11,6 +12,18 @@ class ChatResult:
     text: str
     prompt_tokens: int
     completion_tokens: int
+
+
+# 스트림의 마지막 이벤트. 토큰 수는 응답이 끝나야 알 수 있음
+@dataclass(frozen=True)
+class ChatUsage:
+    prompt_tokens: int
+    completion_tokens: int
+
+
+# 스트림 도중 실패도 한 번에 받을 때와 같은 오류(OpenAIError)로 처리되게 함
+class LLMStreamError(OpenAIError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -73,6 +86,28 @@ class LLMClient:
             prompt_tokens=usage.input_tokens if usage else 0,
             completion_tokens=usage.output_tokens if usage else 0,
         )
+
+    # 글자 조각(str)을 받는 대로 내보내고 마지막에 ChatUsage를 내보냄
+    # 소비하는 쪽이 멈추면(연결 끊김) async with가 스트림을 닫아 생성도 멈춤
+    async def chat_stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str | ChatUsage]:
+        stream = await self._client.responses.create(
+            model=self.chat_model,
+            input=messages,
+            stream=True,
+        )
+        async with stream:
+            async for event in stream:
+                if event.type == "response.output_text.delta":
+                    yield event.delta
+                # 길이 상한으로 끊긴 응답(incomplete)도 chat()처럼 받은 글자까지 답변으로 씀
+                elif event.type in ("response.completed", "response.incomplete"):
+                    usage = event.response.usage
+                    yield ChatUsage(
+                        prompt_tokens=usage.input_tokens if usage else 0,
+                        completion_tokens=usage.output_tokens if usage else 0,
+                    )
+                elif event.type in ("response.failed", "error"):
+                    raise LLMStreamError(f"답변 스트림 실패: {event.type}")
 
     async def analyze[T: BaseModel](
         self, messages: list[dict[str, str]], text_format: type[T]

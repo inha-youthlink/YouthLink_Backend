@@ -1,7 +1,9 @@
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import date
 
+from app.llm.client import ChatUsage
 from app.pipeline.cards import status_of
 from app.pipeline.conditions import load_code_names, load_regions
 from app.pipeline.context import PipelineContext
@@ -28,6 +30,8 @@ NO_EVIDENCE = "검색된 정책 없음"
 # 첫 줄은 카드로 보여 줄 근거 번호. 스트리밍 때도 첫 줄만 모아 카드를 먼저 보낼 수 있는 형식
 # "[소개: 없음]", "[소개: 1번, 3번]"처럼 형식을 조금 벗어나도 숫자만 읽어 후보 전체 표시로 넘어가지 않게 함
 CARD_LINE = re.compile(r"\[소개\s*:([^\]]*)\]")
+# "[소개: 1번, 3번]"도 20자 안팎이라, 이만큼 줄바꿈이 없으면 첫 줄 형식이 아니라고 보고 본문을 바로 흘려보냄
+CARD_LINE_MAX_CHARS = 40
 
 PROFILE_CODE_LABELS = {
     "marriage_status_code": "혼인 상태",
@@ -66,11 +70,29 @@ class CardLine:
     body: str
 
 
-async def generate(ctx: PipelineContext) -> GenerationResult:
+# 스트림 이벤트: 카드 번호(한 번) → 본문 조각들 → GenerationResult. 카드 번호는 항상 첫 본문 조각보다 먼저 나감
+@dataclass(frozen=True)
+class CardsDecided:
+    # None이면 첫 줄 형식을 어긴 경우
+    numbers: list[int] | None
+
+
+@dataclass(frozen=True)
+class AnswerDelta:
+    text: str
+
+
+type GenerationEvent = CardsDecided | AnswerDelta | GenerationResult
+
+
+async def generate_stream(ctx: PipelineContext) -> AsyncIterator[GenerationEvent]:
     evidence = ctx.evidence
     all_cards = list(range(1, len(evidence.candidates) + 1))
     if evidence.reply is not None:
-        return GenerationResult(answer=evidence.reply, prompt_version=None, contexts=[], card_numbers=all_cards)
+        yield CardsDecided(all_cards)
+        yield AnswerDelta(evidence.reply)
+        yield GenerationResult(answer=evidence.reply, prompt_version=None, contexts=[], card_numbers=all_cards)
+        return
 
     if ctx.answer_kind == AnswerKind.SHORT:
         prompt_names = [SHORT_PROMPT]
@@ -84,22 +106,90 @@ async def generate(ctx: PipelineContext) -> GenerationResult:
         user_message = await _user_message(ctx, contexts)
 
     system_prompt = "\n\n".join(load_prompt(name) for name in prompt_names)
-    result = await ctx.deps.llm.chat([
+    messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
-    ])
-    card_line = (
-        CardLine(numbers=all_cards, body=result.text.strip()) if evidence.fixed_cards
-        else parse_card_line(result.text, len(contexts))
-    )
-    return GenerationResult(
-        answer=card_line.body,
+    ]
+    # 카드가 미리 정해지면 첫 줄을 기다리지 않고 바로 카드를 보냄
+    waiting_card_line = not evidence.fixed_cards
+    if not waiting_card_line:
+        yield CardsDecided(all_cards)
+    head = ""
+    numbers: list[int] | None = all_cards
+    body = _Body()
+    usage = ChatUsage(prompt_tokens=0, completion_tokens=0)
+
+    async for piece in ctx.deps.llm.chat_stream(messages):
+        if isinstance(piece, ChatUsage):
+            usage = piece
+            continue
+        if waiting_card_line:
+            head += piece
+            decided = _decide_card_line(head, len(contexts))
+            if decided is None:
+                continue
+            waiting_card_line, numbers = False, decided.numbers
+            yield CardsDecided(numbers)
+            piece = decided.body
+        text = body.feed(piece)
+        if text:
+            yield AnswerDelta(text)
+
+    # 첫 줄 판단 전에 끝난 짧은 답변("[소개: 1]"만 있거나 줄바꿈 없는 한 줄)은 한 번에 받을 때와 같이 파싱함
+    if waiting_card_line:
+        card_line = parse_card_line(head, len(contexts))
+        numbers = card_line.numbers
+        yield CardsDecided(numbers)
+        text = body.feed(card_line.body)
+        if text:
+            yield AnswerDelta(text)
+
+    yield GenerationResult(
+        answer=body.text,
         prompt_version="+".join(prompt_names),
         contexts=contexts,
-        card_numbers=card_line.numbers,
-        prompt_tokens=result.prompt_tokens,
-        completion_tokens=result.completion_tokens,
+        card_numbers=numbers,
+        prompt_tokens=usage.prompt_tokens,
+        completion_tokens=usage.completion_tokens,
     )
+
+
+# 스트림으로 내보낸 본문을 모으면 한 번에 받을 때의 strip() 결과와 같도록 앞 공백은 버리고 뒤 공백은 다음 글자가 올 때까지 보류함
+class _Body:
+    def __init__(self) -> None:
+        self.text = ""
+        self._pending = ""
+
+    def feed(self, piece: str) -> str:
+        if not self.text:
+            piece = piece.lstrip()
+        stripped = piece.rstrip()
+        if not stripped:
+            if self.text:
+                self._pending += piece
+            return ""
+        out = self._pending + stripped
+        self._pending = piece[len(stripped):]
+        self.text += out
+        return out
+
+
+# 첫 줄을 다 받았거나 첫 줄 형식이 아님이 분명해지면 판단함. 아직 모르면 None
+# 본문은 아직 다 받지 않아 strip하지 않고 넘김 (조각 경계의 공백을 지우지 않도록 공백 처리는 _Body가 함)
+def _decide_card_line(head: str, candidate_count: int) -> CardLine | None:
+    text = head.lstrip()
+    if not text:
+        return None
+    if "\n" in text:
+        first, _, rest = text.partition("\n")
+        match = CARD_LINE.fullmatch(first.strip())
+        if match is None:
+            return CardLine(numbers=None, body=text)
+        return CardLine(numbers=_card_numbers(match, candidate_count), body=rest)
+    # 줄 끝 공백은 한 번에 받을 때 strip()으로 지워지므로 길이에 넣지 않음
+    if not text.startswith("[") or len(text.rstrip()) > CARD_LINE_MAX_CHARS:
+        return CardLine(numbers=None, body=text)
+    return None
 
 
 async def _user_message(ctx: PipelineContext, contexts: list[str]) -> str:
@@ -120,9 +210,12 @@ def parse_card_line(text: str, candidate_count: int) -> CardLine:
     match = CARD_LINE.fullmatch(first.strip())
     if match is None:
         return CardLine(numbers=None, body=text.strip())
-    # LLM은 빼기만 하고 순서는 코드가 정한 후보 순서를 따르도록 정렬함. 없는 번호는 버림
-    numbers = sorted({int(n) for n in re.findall(r"\d+", match.group(1)) if 1 <= int(n) <= candidate_count})
-    return CardLine(numbers=numbers, body=rest.strip())
+    return CardLine(numbers=_card_numbers(match, candidate_count), body=rest.strip())
+
+
+# LLM은 빼기만 하고 순서는 코드가 정한 후보 순서를 따르도록 정렬함. 없는 번호는 버림
+def _card_numbers(match: re.Match[str], candidate_count: int) -> list[int]:
+    return sorted({int(n) for n in re.findall(r"\d+", match.group(1)) if 1 <= int(n) <= candidate_count})
 
 
 async def _format_profile(ctx: PipelineContext) -> str:
