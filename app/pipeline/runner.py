@@ -1,5 +1,6 @@
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import aclosing
 from dataclasses import dataclass
 from time import perf_counter
 
@@ -52,7 +53,7 @@ async def run_pipeline(inp: PipelineInput, deps: PipelineDeps) -> PipelineOutput
     raise RuntimeError("파이프라인 스트림이 결과 없이 끝남")
 
 
-async def stream_pipeline(inp: PipelineInput, deps: PipelineDeps) -> AsyncIterator[PipelineEvent]:
+async def stream_pipeline(inp: PipelineInput, deps: PipelineDeps) -> AsyncGenerator[PipelineEvent, None]:
     started = perf_counter()
     ctx = PipelineContext(input=inp, deps=deps, query=inp.question)
 
@@ -84,20 +85,22 @@ async def stream_pipeline(inp: PipelineInput, deps: PipelineDeps) -> AsyncIterat
     evidence = ctx.evidence
     policies: list[PolicyItem] = []
     result: GenerationResult | None = None
-    async for event in generate_stream(ctx):
-        if isinstance(event, CardsDecided):
-            if event.numbers is None:
-                logger.warning("답변 첫 줄 카드 형식이 없어 후보 전체를 카드로 표시함")
-            policies = build_cards(
-                evidence.candidates, evidence.policies, event.numbers, ctx.today, evidence.region_labels
-            )
-            yield PolicyCards(policies)
-        elif isinstance(event, AnswerDelta):
-            # 질문을 받고 사용자가 첫 글자를 보기까지의 시간 (응답 속도 확인용)
-            latency.setdefault("first_token", _elapsed_ms(started))
-            yield AnswerToken(event.text)
-        else:
-            result = event
+    # 받는 쪽이 중간에 닫으면 답변 생성(LLM 스트림)도 바로 닫힘
+    async with aclosing(generate_stream(ctx)) as events:
+        async for event in events:
+            if isinstance(event, CardsDecided):
+                if event.numbers is None:
+                    logger.warning("답변 첫 줄 카드 형식이 없어 후보 전체를 카드로 표시함")
+                policies = build_cards(
+                    evidence.candidates, evidence.policies, event.numbers, ctx.today, evidence.region_labels
+                )
+                yield PolicyCards(policies)
+            elif isinstance(event, AnswerDelta):
+                # 질문을 받고 사용자가 첫 글자를 보기까지의 시간 (응답 속도 확인용)
+                latency.setdefault("first_token", _elapsed_ms(started))
+                yield AnswerToken(event.text)
+            else:
+                result = event
     if result is None:
         raise RuntimeError("답변 스트림이 결과 없이 끝남")
     latency["generate"] = _elapsed_ms(generate_started)

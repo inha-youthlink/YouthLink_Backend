@@ -40,15 +40,19 @@ class FakeLLM:
         )
         self._answer = answer
         self.chat_calls = 0
+        self.stream_closed = False
 
     async def analyze(self, messages, text_format):
         return ParsedResult(QueryAnalysis(sub_queries=[self._sub], is_new_topic=False), 50, 10)
 
     async def chat_stream(self, messages):
         self.chat_calls += 1
-        for start in range(0, len(self._answer), 3):
-            yield self._answer[start:start + 3]
-        yield ChatUsage(prompt_tokens=100, completion_tokens=20)
+        try:
+            for start in range(0, len(self._answer), 3):
+                yield self._answer[start:start + 3]
+            yield ChatUsage(prompt_tokens=100, completion_tokens=20)
+        finally:
+            self.stream_closed = True
 
 
 class FakeRetriever:
@@ -226,3 +230,15 @@ async def test_stream_sends_cards_then_tokens_then_output():
     assert output.policies == events[0].policies
     latency = output.trace["latency_ms"]
     assert latency["analyze"] <= latency["first_token"] <= latency["total"]
+
+
+# 채팅 연결이 끊겨 파이프라인 스트림이 닫히면 LLM 스트림도 바로 닫힘
+async def test_closing_pipeline_stream_closes_llm_stream():
+    llm = FakeLLM(Intent.POLICY_LIST, [], "[소개: 2]\n1. 청년 이사비 지원에 대한 긴 답변")
+    events = stream_pipeline(PipelineInput(question="주거 지원 알려줘"), _deps(llm))
+
+    assert isinstance(await anext(events), PolicyCards)
+    assert isinstance(await anext(events), AnswerToken)
+    await events.aclose()
+
+    assert llm.stream_closed

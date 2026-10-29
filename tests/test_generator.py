@@ -68,15 +68,19 @@ class FakeLLM:
         # 이 조각 수만큼 보낸 뒤 실패해, 스트림이 끝나기 전에 나간 이벤트를 확인함
         self._fail_after = fail_after
         self.messages: list[dict[str, str]] = []
+        self.closed = False
 
     # 실제 스트림처럼 몇 글자씩 나눠 보내 첫 줄이 조각 경계에 걸리는 경우도 거침
     async def chat_stream(self, messages):
         self.messages = messages
-        for sent, start in enumerate(range(0, len(self._text), self._chunk)):
-            if sent == self._fail_after:
-                raise LLMStreamError("중간 실패")
-            yield self._text[start:start + self._chunk]
-        yield ChatUsage(prompt_tokens=100, completion_tokens=20)
+        try:
+            for sent, start in enumerate(range(0, len(self._text), self._chunk)):
+                if sent == self._fail_after:
+                    raise LLMStreamError("중간 실패")
+                yield self._text[start:start + self._chunk]
+            yield ChatUsage(prompt_tokens=100, completion_tokens=20)
+        finally:
+            self.closed = True
 
 
 class FakeCommonCodes:
@@ -305,3 +309,14 @@ async def test_reply_streams_as_one_delta():
 
     assert events[:2] == [CardsDecided([1, 2]), AnswerDelta("어느 정책인가요?")]
     assert isinstance(events[2], GenerationResult)
+
+
+# 받는 쪽이 조각 사이에서 닫으면(연결 끊김) LLM 스트림이 기다리지 않고 바로 닫힘
+async def test_closing_stream_closes_llm_stream():
+    llm = FakeLLM("[소개: 1]\n긴 답변이 이어짐")
+    events = generator.generate_stream(_ctx(llm))
+
+    assert isinstance(await anext(events), CardsDecided)
+    await events.aclose()
+
+    assert llm.closed
