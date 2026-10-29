@@ -7,7 +7,7 @@
 ## 1. 구성
 ```
 브라우저 ──HTTPS──▶ Vercel ──/api/*──▶ EC2:8000 (이 컨테이너) ──▶ PostgreSQL + pgvector
-평가 서버 ─────────────/internal/*───▶ EC2:8000                 └─▶ OpenAI API
+평가 서버 ─────────────/internal/*───▶ EC2:8000                 └─▶ Bedrock 게이트웨이 (OpenAI 호환)
 ```
 - 컨테이너 포트 `8000`, 헬스 체크 `GET /health` (DB·OpenAI는 확인하지 않음, 항상 빠르게 200)
 - **워커(프로세스)는 하나**로 띄웁니다. 요청 제한 횟수를 프로세스 메모리에 세서 여러 개면 따로 셉니다
@@ -34,7 +34,8 @@ docker run -d --name youthlink-backend --restart unless-stopped \
 
 | 변수 | 운영 값 | 설명 |
 |---|---|---|
-| `OPENAI_API_KEY` | 필수 | |
+| `OPENAI_API_KEY` | 필수 | Bedrock 게이트웨이 키 |
+| `OPENAI_BASE_URL` | 필수 | Bedrock 게이트웨이 주소 (비우면 OpenAI에 바로 붙음) |
 | `DATABASE_URL` | 필수 | `postgresql+asyncpg://user:password@host:5432/dbname` |
 | `APP_ENV` | `prod` | API 문서(`/docs`)를 끄고, 아래 안전 설정이 없으면 **시작하지 않음** |
 | `DEBUG` | 비움 | `prod`에서 `true`면 시작하지 않음 (오류 화면에 내부 정보가 나감) |
