@@ -5,7 +5,7 @@ YouthLink RAG 기반 청년 지원 챗봇 및 신청 가이드 시스템의 백�
 - FastAPI 서버 하나가 프론트용 공개 API, 채팅 저장, RAG 파이프라인을 맡습니다. 로그인은 없고 브라우저별 익명 ID로 사용자를 구분합니다 (Spring은 두지 않기로 결정, [설계 문서](docs/design.md) 15절)
 - 정책 데이터와 임베딩은 ETL 서버가 적재하고, 평가 서버는 내부 API(`/internal/pipeline`)로 RAG 성능을 평가합니다
 - 공개 API(`/api/sessions` 등, 프론트 계약 기준)는 세션·채팅 SSE 뼈대까지 구현했고, 나머지는 9~10주차에 구현합니다 ([8주차 계획](docs/weekly/week08.md) 7절, [프론트 연동 현황](docs/front-sync.md))
-- 배포는 Docker 컨테이너 하나입니다 ([배포 안내](docs/deploy.md))
+- 배포 설정(컨테이너 이미지 등)은 별도 배포 저장소에서 관리합니다. 운영에 필요한 조건과 주의사항은 [운영 안내](docs/deploy.md)를 참고하세요
 
 ## 설계 및 작업 기록
 
@@ -54,17 +54,7 @@ uv run uvicorn app.main:app --reload
 - API 문서 (Swagger UI): http://127.0.0.1:8000/docs
 - API 문서 (ReDoc): http://127.0.0.1:8000/redoc
 - 운영(`APP_ENV=prod`)에서는 API 문서가 꺼집니다
-
-### Docker로 실행
-
-```bash
-docker build -t youthlink-backend .
-docker run --env-file .env -p 8000:8000 youthlink-backend
-```
-
-- `.env`의 `DATABASE_URL`이 `localhost`면 컨테이너 안에서는 `host.docker.internal`로 바꿔야 합니다.
-- env 파일에는 값 뒤에 주석을 쓰지 않습니다. Docker는 `# 메모`까지 값으로 읽습니다 (`.env.example` 형식 참고).
-- 운영 설정·보안·요청 제한은 [배포 안내](docs/deploy.md)를 참고하세요.
+- 운영 설정·보안·요청 제한은 [운영 안내](docs/deploy.md)를 참고하세요
 
 ### 테스트
 
