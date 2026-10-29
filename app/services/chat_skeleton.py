@@ -5,16 +5,18 @@ from uuid import UUID
 from app.core.config import Settings
 from app.core.sse import sse_event
 from app.schemas.policy_info import ApplicationStatus
-from app.schemas.session import PolicySummary
+from app.schemas.session import NATIONWIDE, PolicyCategory, PolicySummary
 
 # 프론트가 카드를 그려 볼 수 있게 계약 형식 그대로 둔 검증용 정책
 SKELETON_POLICY = PolicySummary(
     id="SKELETON-1",
     title="SSE 검증용 정책",
+    category=PolicyCategory.WELFARE,
     apply_start=None,
     apply_end=None,
     status=ApplicationStatus.ALWAYS_OPEN,
     region_label="전국",
+    region=NATIONWIDE,
     organization="YouthLink",
     source_url=None,
 )

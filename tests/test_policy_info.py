@@ -2,7 +2,16 @@ from datetime import date
 
 import pytest
 
-from app.schemas.policy_info import ALWAYS_OPEN_CODE, CLOSED_CODE, ApplicationStatus, application_status, clean_url
+from app.schemas.analysis import Category
+from app.schemas.policy_info import (
+    ALWAYS_OPEN_CODE,
+    CLOSED_CODE,
+    ApplicationStatus,
+    application_status,
+    category_of,
+    clean_url,
+)
+from app.schemas.session import legacy_card_region
 
 TODAY = date(2026, 10, 23)
 PERIOD_CODE = "0057001"
@@ -43,3 +52,35 @@ def test_application_status(code, start, end, expected):
 )
 def test_clean_url(value, expected):
     assert clean_url(value) == expected
+
+
+# 옛 분류와 새 분류 이름을 같은 분류로 보고, 여러 개면 첫 번째, 없으면 지어내지 않음
+@pytest.mark.parametrize(
+    ("names", "expected"),
+    [
+        (["금융･복지･문화"], Category.WELFARE_CULTURE),
+        (["복지문화"], Category.WELFARE_CULTURE),
+        (["참여권리", "참여권리"], Category.PARTICIPATION),
+        (["일자리", "교육"], Category.JOB),
+        (["모르는 분류", "주거"], Category.HOUSING),
+        ([], None),
+    ],
+)
+def test_category_of(names, expected):
+    assert category_of(names) == expected
+
+
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        ("서울특별시 강남구", "SEOUL"),
+        ("경기도 5곳", "GYEONGGI"),
+        ("전북특별자치도", "JEONBUK"),
+        ("전남광주통합특별시 북구", "JEONNAM"),
+        ("서울특별시 외 14개 시도", "NATIONWIDE"),
+        ("전국", "NATIONWIDE"),
+        (None, "NATIONWIDE"),
+    ],
+)
+def test_legacy_card_region(label, expected):
+    assert legacy_card_region(label) == expected

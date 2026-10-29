@@ -11,8 +11,13 @@ from app.core.rate_limit import DailyLimiter, RateLimits, WindowLimiter
 from app.main import app
 from app.schemas.pipeline import PipelineOutput
 from app.schemas.policy_info import KST
-from app.services.chat_service import ChatService
-from tests.test_sessions_api import HEADERS, OTHER_CLIENT_ID, FakeChatRepository
+from tests.test_sessions_api import (
+    HEADERS,
+    OTHER_CLIENT_ID,
+    PROFILE,
+    FakeChatRepository,
+    make_service,
+)
 
 MESSAGE = {"clientMessageId": "5d7f0a3e-2b1c-4e8f-9a6d-3c2b1a0f9e8d", "content": "질문"}
 
@@ -107,7 +112,7 @@ def limited():
         repo = FakeChatRepository()
         app.dependency_overrides[get_rate_limits] = lambda: limits
         app.dependency_overrides[get_settings] = lambda: settings
-        app.dependency_overrides[get_chat_service] = lambda: ChatService(repo, None)
+        app.dependency_overrides[get_chat_service] = lambda: make_service(repo)
         return TestClient(app)
 
     yield make
@@ -115,7 +120,7 @@ def limited():
 
 
 def _new_session(client, headers=HEADERS) -> str:
-    return client.post("/api/sessions", json={}, headers=headers).json()["id"]
+    return client.post("/api/sessions", json={"profile": PROFILE}, headers=headers).json()["id"]
 
 
 def test_public_api_limit_per_ip(limited):

@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.analysis import Category
 from app.schemas.policy_info import ApplicationStatus
 
 
@@ -61,6 +62,7 @@ class PolicyItem(BaseModel):
     supervising_org_name: str | None = None
     # 정책 지역이 여러 곳이거나 시군구 단위라 코드 하나로 나타낼 수 없어 표시 문구로 줌 ("서울특별시 강남구", "전국")
     region_label: str | None = None
+    category: Category | None = None
 
 
 class PipelineOutput(BaseModel):

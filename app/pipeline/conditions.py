@@ -14,6 +14,7 @@ JOB = "취업 상태"
 SCHOOL = "학력"
 # 다른 지역·나이로 거른 결과는 프로필 결과와 전혀 달라 되묻고, 취업 상태·학력은 가정 질문이 많아 답변에서 짚음
 ASK_BACK_NAMES = frozenset({REGION, AGE})
+OTHER_CODE_NAME = "기타"
 
 JOB_CODES = {
     JobStatus.EMPLOYED: "0013001",
@@ -187,12 +188,24 @@ class RegionIndex:
             return None
         if code in self._by_code:
             return self._by_code[code]
-        if code.endswith("0"):
-            city = next((unit for c, unit in self._by_code.items() if c[:4] == code[:4] and len(unit.codes) > 1), None)
-            if city is not None:
-                return city
+        city = self._city(code)
+        if city is not None:
+            return city
         # 모르는 시군구 코드는 잘못 빼지 않도록 시도 전체로 거름
         return self.sido_region(code[:2])
+
+    # 모르는 코드도 profile_region이 시도 전체로 받아 주므로, 세션을 만들 때 이것으로 먼저 막음
+    def is_profile_code(self, code: str) -> bool:
+        if code in self._by_code:
+            return True
+        if code[:2] in self.sido_names and code[2:] == "000":
+            return True
+        return self._city(code) is not None
+
+    def _city(self, code: str) -> Region | None:
+        if not code.endswith("0"):
+            return None
+        return next((unit for c, unit in self._by_code.items() if c[:4] == code[:4] and len(unit.codes) > 1), None)
 
     # "인천 부평구"처럼 시도와 시군구가 함께 있으면 더 좁은 시군구를 씀
     def resolve(self, text: str) -> Region | None:
@@ -310,8 +323,10 @@ def _mismatches(subs: list[ResolvedSubQuery], conditions: SearchConditions, regi
     return [found[name] for name in (REGION, AGE, JOB, SCHOOL) if name in found]
 
 
+# "기타"는 정해진 분류에 맞지 않는다는 뜻이라 그 분류 전용 정책을 빼면 맞는 정책까지 빠질 수 있어 거르지 않음
+# "제한없음"(해당 없음)은 사용자가 그 대상이 아니라고 답한 것이라 그대로 거름
 def _profile_code(code: str | None, code_names: dict[str, str]) -> Condition | None:
-    if not code:
+    if not code or code_names.get(code) == OTHER_CODE_NAME:
         return None
     return Condition(code, code_names.get(code, code))
 

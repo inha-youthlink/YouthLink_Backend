@@ -4,7 +4,7 @@ from app.pipeline.grouping import PolicyGroup
 from app.repositories.policy_repository import PolicyRecord
 from app.schemas.analysis import Category
 from app.schemas.pipeline import PolicyItem
-from app.schemas.policy_info import ApplicationStatus, application_status
+from app.schemas.policy_info import CATEGORY_NAMES, ApplicationStatus, application_status
 
 # 관련도가 비슷하면 신청 가능한 정책이 앞서고, 관련도가 크게 높으면 마감 정책도 남도록 순위 대신 감점을 씀
 # 감점 값은 평가 세트(질문 25개)로 정한 임시 기준값
@@ -18,14 +18,6 @@ STATUS_PENALTY = {
 
 # 넓은 질문에서 같은 분야 정책을 조금 앞세움. 거르지 않아 분야가 엇갈리게 분류된 정책도 남음 (평가 세트로 정한 임시 값)
 CATEGORY_BONUS = 0.04
-# 정책 대분류에 옛 분류와 새 분류가 섞여 있어 둘 다 맞춤
-CATEGORY_NAMES = {
-    Category.JOB: frozenset({"일자리"}),
-    Category.HOUSING: frozenset({"주거"}),
-    Category.EDUCATION: frozenset({"교육･직업훈련", "교육"}),
-    Category.WELFARE_CULTURE: frozenset({"금융･복지･문화", "복지문화"}),
-    Category.PARTICIPATION: frozenset({"참여･기반", "참여권리"}),
-}
 
 
 def pick_candidates(

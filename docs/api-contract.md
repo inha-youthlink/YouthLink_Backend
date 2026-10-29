@@ -1,6 +1,6 @@
 # YouthLink 공개 API 계약
 
-- 상태: **백엔드 검토안 v0.4 — 10-26 회의 전**
+- 상태: **v0.6 잠정 — 프론트 확인 전.** 1~3절의 백엔드 제안대로 4절을 정리하고 이 기준으로 먼저 구현함. 프론트와 협의해 바뀌는 내용이 있으면 4절과 구현에 추가로 반영함
 - 기준: 프론트 초안 `YouthLink_Front/spec/api-contract.md` **v0.3** (이 문서의 `R1`, `§2.3` 같은 번호는 프론트 초안의 번호)
 - 범위: 브라우저(React) ↔ 백엔드(FastAPI) 공개 API `/api/*`. 평가 서버용 `/internal/*`은 다루지 않는다
 
@@ -114,7 +114,7 @@
 ## 3. 합의 필요
 | # | 안건 | 백엔드 의견 | 관련 |
 |---|---|---|---|
-| H1 | 정책 카테고리 코드 (§2.1, Q1) | 정책 데이터 분류는 일자리 / 주거 / 교육 / **금융·복지·문화(한 묶음)** / 참여·권리. 금융과 복지가 나뉘어 있지 않아 `FINANCE`·`WELFARE`를 합치거나 `PARTICIPATION`을 추가해야 함. B3이 받아들여지면 카테고리는 정책 검색 필터에만 쓰임 | R7 |
+| H1 | 정책 카테고리 코드 (§2.1, Q1) | 정책 데이터 분류는 일자리 / 주거 / 교육 / **금융·복지·문화(한 묶음)** / 참여·권리. 금융과 복지가 나뉘어 있지 않아 `FINANCE`·`WELFARE`를 합치거나 `PARTICIPATION`을 추가해야 함. B3이 받아들여지면 카테고리는 정책 검색 필터에만 쓰임. **→ 백엔드 결정 (10-29): 5개 `JOB`·`HOUSING`·`EDUCATION`·`WELFARE`·`PARTICIPATION` (4.2)** | R7 |
 | H2 | 프로필 코드와 정책 데이터 코드 맞추기 (§2.3) | 계약 enum(`EMPLOYED`, `OTHER`, `NONE` 등) ↔ 정책 공통코드 매핑표를 백엔드가 만들어 이 문서에 붙임. 특히 `OTHER`(기타)·`NONE`(해당 없음)이 어긋나면 1차 필터가 정책을 잘못 뺌 | R7 |
 | H3 | 프로필 `region` 값 형식 (B1) | 법정 행정구역 코드 5자리 문자열 제안: 시군구 `"11680"`(서울 강남구), 시도 전체 `"41000"`(끝 3자리 `000`). 구가 있는 시(수원시)는 시 코드 `"41110"`과 그 시의 구 코드(`"41117"` 등)를 **모두 수원시 전체로 받음** (백엔드 구현됨, #36) → B2 목록 API가 줄 코드를 둘 중 하나로 정하면 됨. 표시명은 B2 목록 API가 줌 | B1, B2 |
 | H4 | 되묻기 버튼 (B4) | 처음에는 텍스트만. 필요하면 나중에 "프로필 기준으로 다시 묻기"(프론트가 지역을 뺀 질문을 대신 보냄), "말씀하신 조건으로 새 채팅방"(새 세션 화면을 바뀐 지역·나이로 채움) 버튼 | B4 |
@@ -126,12 +126,121 @@
 - 정책 ID 형식, 검색 키워드 길이 상한, `category`·`region` 서버 검증 (§4.3)
 - 가이드 PDF 응답의 `Cache-Control: no-store`, `Content-Type: application/pdf` (§4.4)
 
-## 4. 계약 본문
+## 4. 계약 본문 (잠정)
 
-> 회의에서 합의된 항목부터 채운다. 프론트 초안 v0.3의 구조(공통 규칙, 코드 값, 공통 타입, REST 엔드포인트, 채팅 스트리밍)를 따른다.
+> 프론트 초안 v0.3의 구조를 따른다. **여기에 적지 않은 것은 프론트 초안 v0.3의 같은 절 그대로**다. 1~3절의 수락·제안을 반영해 바뀐 부분만 적는다. 각 항목의 `구현`은 백엔드 구현 시점(4c = 공개 API 1-2, API 2 = 공개 API 2)
+
+### 4.1 공통 규칙 (v0.3 §1)
+- 호출 대상: Spring이 아니라 **FastAPI 서버**. Vercel rewrites 대상만 바뀜 (R1)
+- 오류 형식 `{ code, message, details? }`. v0.3 표에 더해
+  - `400 VALIDATION_FAILED`: FastAPI 기본 검증 오류(422)도 이 형식으로 바꿔 보냄
+  - `403 FORBIDDEN`(Vercel 출처 확인을 켰을 때), `404 NOT_FOUND`·`405 METHOD_NOT_ALLOWED`(없는 경로·메서드), `413 PAYLOAD_TOO_LARGE`(본문 256KB 초과)
+  - `429 RATE_LIMITED` + `Retry-After`. 하루 LLM 상한도 같은 코드이고 `message`로 구분
+  - `502 RAG_UPSTREAM_ERROR`: "LLM 호출 실패"
+- 요청 제한 기준: 공개 API IP당 분당 300, 채팅 IP당 분당 60 + `X-Client-Id`당 분당 10, 서버 전체 하루 LLM 호출 1,000 (`docs/front-sync.md`)
+
+### 4.2 코드 값 (v0.3 §2)
+**정책 카테고리 `Category`** (H1)
+| 코드 | 표시명 | 정책 데이터 대분류 |
+|---|---|---|
+| `JOB` | 일자리 | 일자리 |
+| `HOUSING` | 주거 | 주거 |
+| `EDUCATION` | 교육 | 교육(·직업훈련) |
+| `WELFARE` | 복지·문화 | 금융·복지·문화 (데이터에서 한 묶음) |
+| `PARTICIPATION` | 참여·권리 | 참여·권리 |
+- v0.3의 `FINANCE`는 없음 (데이터에서 금융과 복지가 나뉘지 않음). 세션에는 카테고리가 없고(B3) 카드·정책 검색 필터에만 씀
+- 구현: 카드 4c, 검색 필터 API 2
+
+**지역** (B1, H3)
+- 값: 법정 행정구역 코드 5자리 문자열. 시군구 `"11680"`(서울 강남구), 시도 전체 `"11000"`(끝 3자리 `000`), 전국 정책 표시는 `regionLabel`의 `"전국"`
+- 서울·광역시는 구, 도는 시·군 단위. 구가 있는 시(수원시)는 시 코드와 그 시의 구 코드를 모두 그 시 전체로 받음. 어느 쪽을 쓸지는 지역 목록 API(B2)가 주는 코드로 정함
+- 필터 범위: 고른 시군구 + 그 시도 전체 + 전국
+- 지역 목록 `GET /api/regions`: 시도별 시군구 목록(코드, 표시명, "○○ 전체" 포함). 구현 API 2
+
+**프로필 `Profile`** (v0.3 §2.3, 8항목 모두 필수)
+- `region`만 위 5자리 코드로 바뀌고, 나머지 필드·enum 값은 v0.3 그대로
+- 검증: 나이 15~39, 연소득 0~1,000,000(만 원, 백엔드가 원으로 바꿔 정책 소득 기준과 비교), enum 밖 값·모르는 지역 코드는 `400 VALIDATION_FAILED` + 필드별 `details`
+- 응답의 `profile`도 같은 형식. `region`은 저장한 5자리 코드 (과도기 시도 enum은 바꾼 코드, 4.6). 구현됨 (4c-1)
+
+**enum ↔ 정책 데이터 공통코드** (H2)
+| 필드 | 계약 값 → 공통코드 |
+|---|---|
+| `maritalStatus` | `SINGLE` 0055002 미혼, `MARRIED` 0055001 기혼 |
+| `education` | `BELOW_HIGH_SCHOOL` 0049001, `HIGH_SCHOOL_ENROLLED` 0049002, `HIGH_SCHOOL_GRADUATED` 0049004, `COLLEGE_ENROLLED` 0049005, `COLLEGE_EXPECTED` 0049006, `COLLEGE_GRADUATED` 0049007, `GRADUATE_SCHOOL` 0049008, `OTHER` 0049009 기타 |
+| `major` | `HUMANITIES` 0011001 ~ `AGRICULTURE` 0011007 (v0.3 순서대로), `OTHER` 0011008 기타, `NONE` 0011009 제한없음 |
+| `employmentStatus` | `EMPLOYED` 0013001 ~ `FARMER` 0013008 (v0.3 순서대로), `OTHER` 0013009 기타 |
+| `specialField` | `SME` 0014001 ~ `LOCAL_TALENT` 0014008 (v0.3 순서대로), `NONE` 0014010 제한없음 |
+
+- **`NONE`(해당 없음)**: 사용자가 그 대상이 아니라고 답한 것이라, 특정 전공·대상 전용 정책(예: "중소기업 재직자만")은 추천에서 빠짐
+- **`OTHER`(기타)**: 정해진 분류에 맞지 않는다는 뜻이라 그 항목으로는 거르지 않음 (특정 값 전용 정책도 남김). 답변 생성에는 "기타"로 전달
+- 정책 데이터의 학력 "고졸 예정"(0049003)은 계약 enum에 없음
+
+### 4.3 공통 타입 (v0.3 §3)
+```ts
+interface ChatSession {
+  id: string
+  title: string            // 첫 질문으로 서버가 만듦. 첫 질문 전에는 "새 대화" (B3)
+  profile: Profile
+  createdAt: ISODateTime
+  // category 없음 (B3)
+}
+
+type ApplicationStatus = 'OPEN' | 'ALWAYS_OPEN' | 'UPCOMING' | 'CLOSED' | 'UNKNOWN'
+
+interface PolicySummary {
+  id: string
+  title: string
+  category: Category | null // 정책 데이터 대분류. 여러 개면 첫 번째, 대분류가 없는 정책(1건)은 null
+  regionLabel: string      // "서울특별시 강남구", "경기도 5곳", "서울특별시 외 14개 시도", "전국" (B6)
+  applyStart: ISODate | null
+  applyEnd: ISODate | null
+  status: ApplicationStatus // 서버가 한국 날짜 기준으로 계산. D-day는 OPEN·UPCOMING일 때만 (B5)
+  organization: string | null // 담당 기관 (B7)
+  sourceUrl: string | null // 관련 사이트. 절반 이상이 기관 홈페이지 첫 화면이라 버튼 문구는 중립적으로 (B7)
+}
+
+interface PolicyDetail extends PolicySummary {
+  summary: string
+  eligibility: string
+  benefits: string
+  howToApply: string       // 비어 있으면 "공고에 나와 있지 않음" (B7)
+  requiredDocuments: string // 목록이 아니라 문자열 하나. 원본이 자유 문장 (B7)
+}
+```
+- `Message`, `Scrap`은 v0.3 그대로. `Message.policies`의 순서는 답변 본문의 소개 순서와 같음 (B8, 카드 번호 배지 = 배열 위치 + 1)
+- 구현: `ChatSession`·카드 됨 (4c-1), `PolicyDetail` API 2
+
+### 4.4 REST 엔드포인트 (v0.3 §4)
+| 엔드포인트 | v0.3과 다른 점 | 구현 |
+|---|---|---|
+| `POST /api/sessions` | 요청에 `category` 없음 (B3) | 됨 |
+| `GET /api/sessions`, `GET /api/sessions/{id}`, `GET /api/sessions/{id}/messages` | 없음. 목록은 만든 시각 내림차순 | 됨 |
+| `POST /api/sessions/{id}/summary` | 없음 | API 2 |
+| `GET /api/sessions/{id}/recommendations` | 기준이 세션 카테고리가 아니라 **대화에서 나온 분야**. 대화 전이면 프로필 기준으로 신청 가능한 정책 (B3) | API 2 |
+| `GET /api/policies` | `category`는 4.2의 5개, `region`은 5자리 코드 (필터 범위는 4.2) | API 2 |
+| `GET /api/policies/{id}` | 필드는 4.3 `PolicyDetail` | API 2 |
+| `GET /api/regions` | 새로 추가 (B2) | API 2 |
+| `POST /api/sessions/{id}/guides` | 없음. PDF 생성은 이번 범위 뒤, 프론트 mock 유지 (R9) | 나중 |
+| 스크랩 3개 | 없음 | API 2 |
+
+### 4.5 채팅 스트리밍 (v0.3 §5)
+- 요청: v0.3 그대로. `content`는 1~1000자
+- 이벤트: v0.3 그대로. 다만 **`policies`는 첫 `token` 바로 앞**에 보냄 (B9). 카드가 없는 답변(인사, 조건 되묻기 등)은 `policies`를 보내지 않음
+- 종료 규칙·멱등 처리 표(§5.3): v0.3 그대로. 멱등 키 범위는 세션 단위. 구현 4c
+- 조건 되묻기 (B4): 질문의 지역·나이가 프로필과 다르면 검색하지 않고 일반 `token` 답변으로 되물음 (구현됨, #35)
+- 연결 유지 (R4): 연결 타임아웃 120초 이상, 15초 `:ping`, `Cache-Control: no-cache`, `X-Accel-Buffering: no` (구현됨)
+- SSE 검증 (R2, §5.4): 채팅 API 뼈대로 함. 더미 `POST /api/health/stream`은 만들지 않음. 뼈대는 4c 뒤에도 설정으로 켤 수 있게 남기고, 배포 경로 검증이 끝나면 지움
+
+### 4.6 과도기 호환 (구현됨, 프론트가 바뀌면 지움)
+프론트 코드가 아직 v0.3 형식이라 첫 실연동이 깨지지 않게 백엔드가 잠시 함께 받거나 보냄
+- 프로필 `region`: 5자리 코드와 함께 v0.3 시도 enum(`SEOUL` 등)도 받아 "○○ 전체" 코드로 바꿈 (`SEOUL` → `"11000"`). 광주·전남은 정책 데이터에서 통합특별시 하나라 `GWANGJU`·`JEONNAM` 모두 `"12000"`. 응답의 `profile.region`은 바꾼 5자리 코드
+- 세션 생성의 `category`: 보내도 무시
+- 카드: `regionLabel`과 함께 v0.3 `region`도 보냄. 시도 하나("서울특별시 강남구", "경기도 5곳")면 그 시도 enum, 그 밖("전국", "○○ 외 N개 시도")은 `NATIONWIDE`. 통합특별시는 `JEONNAM`
 
 ## 변경 이력
 - v0.1 (2026-10-25): 프론트 초안 v0.3에 대한 백엔드 검토안. 수락·제안·합의 필요 정리
 - v0.2 (2026-10-25): 백엔드 구현(#35 조건 원칙, #36 시군구 필터)에 맞춤. B4 되묻기 문구 변경, 같은 시도의 다른 시군구도 되묻기, 알 수 없는 지명은 답변에서 안내. H3 구가 있는 시의 코드 처리, H4 버튼 문구
 - v0.3 (2026-10-25): 프론트 초안 대조로 빠진 것 보강. R2 더미 대신 뼈대(세션 먼저 생성), 질문 길이 1~1000자, R1 배포 대안 시 CORS·HTTPS, Q4는 PDF 때, B1 정책 검색 지역 필터, B3 첫 질문 전 제목과 프론트 영향, 나중에 답할 것 목록
 - v0.4 (2026-10-26): §1.4 표에 없는 오류 코드(413, 403, 404·405)와 하루 LLM 상한 429 추가
+- v0.5 (2026-10-29): 잠정본. 4절 계약 본문을 1~3절 제안 기준으로 채움, H1 카테고리 5개 결정, 과도기 호환(4.6)
+- v0.6 (2026-10-29): H2 매핑표와 `NONE`·`OTHER` 처리, 카드 `category` null 허용, 연소득 상한, 과도기 호환 세부 (공개 API 1-2 첫 단계 구현)
