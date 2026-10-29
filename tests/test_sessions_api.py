@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -7,6 +8,8 @@ from fastapi.testclient import TestClient
 from app.api.sessions import get_chat_service
 from app.main import app
 from app.repositories.chat_repository import RoomRecord
+from app.repositories.policy_repository import RegionRow
+from app.schemas.analysis import Category
 from app.schemas.chat import MessageItem
 from app.schemas.pipeline import PolicyItem, Profile
 from app.schemas.policy_info import ApplicationStatus
@@ -16,6 +19,33 @@ CLIENT_ID = "6f1c2b9e-3d4a-4c8b-9f2e-1a2b3c4d5e6f"
 OTHER_CLIENT_ID = "0b6a4b1e-8d1f-4f5e-a2c3-9e8d7c6b5a40"
 HEADERS = {"X-Client-Id": CLIENT_ID}
 CREATED_AT = datetime(2026, 10, 25, 3, 0, tzinfo=UTC)
+
+# 계약 형식 프로필 (8항목 필수)
+PROFILE = {
+    "region": "11680",
+    "maritalStatus": "SINGLE",
+    "age": 27,
+    "annualIncome": 3000,
+    "education": "COLLEGE_GRADUATED",
+    "major": "ENGINEERING",
+    "employmentStatus": "UNEMPLOYED",
+    "specialField": "NONE",
+}
+REGIONS = [
+    RegionRow("11", "서울특별시", "종로구", "11110"),
+    RegionRow("11", "서울특별시", "강남구", "11680"),
+    RegionRow("41", "경기도", "수원시 장안구", "41111"),
+    RegionRow("41", "경기도", "수원시 권선구", "41113"),
+]
+
+
+class FakePolicyRepository:
+    async def list_regions(self) -> list[RegionRow]:
+        return REGIONS
+
+
+def make_service(repo: "FakeChatRepository") -> ChatService:
+    return ChatService(repo, SimpleNamespace(policy_repository=FakePolicyRepository()))
 
 
 class FakeChatRepository:
@@ -51,19 +81,19 @@ def repo() -> FakeChatRepository:
 
 @pytest.fixture
 def client(repo):
-    app.dependency_overrides[get_chat_service] = lambda: ChatService(repo, None)
+    app.dependency_overrides[get_chat_service] = lambda: make_service(repo)
     yield TestClient(app)
     app.dependency_overrides.clear()
 
 
 def _create(client, headers=HEADERS, profile=None) -> dict:
-    response = client.post("/api/sessions", json={"profile": profile or {}}, headers=headers)
+    response = client.post("/api/sessions", json={"profile": profile or PROFILE}, headers=headers)
     assert response.status_code == 201
     return response.json()
 
 
-def test_create_session(client):
-    response = client.post("/api/sessions", json={"profile": {"age": 27, "region_code": "11680"}}, headers=HEADERS)
+def test_create_session(client, repo):
+    response = client.post("/api/sessions", json={"profile": PROFILE}, headers=HEADERS)
 
     assert response.status_code == 201
     body = response.json()
@@ -71,21 +101,89 @@ def test_create_session(client):
     # 첫 질문 전 제목, 한국 시각
     assert body["title"] == "새 대화"
     assert body["createdAt"] == "2026-10-25T12:00:00+09:00"
-    assert body["profile"]["age"] == 27
-    assert body["profile"]["region_code"] == "11680"
+    # 계약 형식으로 되돌려 줌
+    assert body["profile"] == PROFILE
+    # 저장은 DB 코드, 연소득은 원 단위
+    assert repo.rooms[uuid.UUID(body["id"])].profile == Profile(
+        age=27,
+        region_code="11680",
+        marriage_status_code="0055002",
+        annual_income=30_000_000,
+        major_code="0011005",
+        job_code="0013003",
+        school_code="0049007",
+        special_target_code="0014010",
+    )
 
 
-def test_create_session_without_body_profile(client):
-    response = client.post("/api/sessions", json={}, headers=HEADERS)
+# 과도기 호환: v0.3 프론트가 보내는 세션 분야는 무시하고, 시도 enum은 "○○ 전체" 코드로 받음
+def test_create_session_accepts_v03_request(client):
+    body = _create(client, profile={**PROFILE, "region": "SEOUL"})
+    response = client.post(
+        "/api/sessions", json={"category": "HOUSING", "profile": {**PROFILE, "region": "GYEONGGI"}}, headers=HEADERS
+    )
 
+    assert body["profile"]["region"] == "11000"
     assert response.status_code == 201
+    assert response.json()["profile"]["region"] == "41000"
 
 
-def test_create_session_validation(client):
-    response = client.post("/api/sessions", json={"profile": {"age": -1}}, headers=HEADERS)
+@pytest.mark.parametrize("region", ["11680", "11000", "41110", "41113"])
+def test_create_session_region_codes(client, region):
+    assert _create(client, profile={**PROFILE, "region": region})["profile"]["region"] == region
+
+
+@pytest.mark.parametrize("region", ["99999", "11999", "1168", "강남구"])
+def test_create_session_rejects_unknown_region(client, region):
+    response = client.post("/api/sessions", json={"profile": {**PROFILE, "region": region}}, headers=HEADERS)
 
     assert response.status_code == 400
-    assert response.json()["details"] == [{"field": "profile.age", "reason": "0 이상이어야 합니다."}]
+    assert response.json() == {
+        "code": "VALIDATION_FAILED",
+        "message": "입력값을 확인해 주세요.",
+        "details": [{"field": "profile.region", "reason": "지원하지 않는 지역 코드입니다."}],
+    }
+
+
+@pytest.mark.parametrize(
+    ("profile", "detail"),
+    [
+        ({**PROFILE, "age": 14}, {"field": "profile.age", "reason": "15 이상이어야 합니다."}),
+        ({**PROFILE, "age": 40}, {"field": "profile.age", "reason": "39 이하여야 합니다."}),
+        ({**PROFILE, "annualIncome": -1}, {"field": "profile.annualIncome", "reason": "0 이상이어야 합니다."}),
+        ({**PROFILE, "major": "LAW"}, {"field": "profile.major", "reason": "허용된 값이 아닙니다."}),
+        (
+            {key: value for key, value in PROFILE.items() if key != "specialField"},
+            {"field": "profile.specialField", "reason": "필수 항목입니다."},
+        ),
+    ],
+)
+def test_create_session_validation(client, profile, detail):
+    response = client.post("/api/sessions", json={"profile": profile}, headers=HEADERS)
+
+    assert response.status_code == 400
+    assert response.json()["details"] == [detail]
+
+
+def test_create_session_requires_profile(client):
+    response = client.post("/api/sessions", json={}, headers=HEADERS)
+
+    assert response.status_code == 400
+    assert response.json()["details"] == [{"field": "profile", "reason": "필수 항목입니다."}]
+
+
+# 8주차 임시 형식(DB 코드, 모두 선택)으로 만든 세션도 목록이 깨지지 않게 빈 값은 null
+def test_old_session_profile_is_nullable(client, repo):
+    room_id = uuid.uuid4()
+    repo.rooms[room_id] = RoomRecord(room_id, CLIENT_ID, None, CREATED_AT, Profile(age=27))
+
+    response = client.get("/api/sessions", headers=HEADERS)
+
+    assert response.status_code == 200
+    assert response.json()[0]["profile"] == {
+        "region": None, "maritalStatus": None, "age": 27, "annualIncome": None,
+        "education": None, "major": None, "employmentStatus": None, "specialField": None,
+    }
 
 
 def test_requires_client_id(client):
@@ -162,6 +260,7 @@ def test_list_messages(client, repo):
             application_status=ApplicationStatus.OPEN,
             supervising_org_name="서울특별시",
             region_label="서울특별시",
+            category=Category.WELFARE_CULTURE,
         )
     ]
 
@@ -182,10 +281,12 @@ def test_list_messages(client, repo):
         {
             "id": "P-1",
             "title": "청년 월세 지원",
+            "category": "WELFARE",
             "applyStart": "2026-10-01",
             "applyEnd": "2026-11-30",
             "status": "OPEN",
             "regionLabel": "서울특별시",
+            "region": "SEOUL",
             "organization": "서울특별시",
             "sourceUrl": "https://example.com",
         }

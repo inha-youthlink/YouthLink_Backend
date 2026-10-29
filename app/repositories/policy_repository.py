@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.pipeline import PolicyItem
-from app.schemas.policy_info import ALWAYS_OPEN_CODE, CLOSED_CODE, application_status, clean_url
+from app.schemas.policy_info import ALWAYS_OPEN_CODE, CLOSED_CODE, application_status, category_of, clean_url
 
 NO_RESTRICTION_MARRIAGE_CODE = "0055003"
 ANNUAL_INCOME_CODE = "0043002"
@@ -108,6 +108,7 @@ class PolicyRecord:
             ),
             supervising_org_name=self.supervising_org_name,
             region_label=region_label,
+            category=category_of(self.large_categories),
         )
 
 

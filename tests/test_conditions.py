@@ -104,6 +104,25 @@ def test_profile_region_unknown_sido():
     assert REGIONS.profile_region(None) is None
 
 
+# profile_region이 시도 전체로 받아 주는 모르는 코드(41999)는 세션을 만들 때 막음
+@pytest.mark.parametrize(
+    ("code", "known"),
+    [("11680", True), ("41000", True), ("41110", True), ("41117", True), ("41999", False), ("99000", False)],
+)
+def test_is_profile_code(code, known):
+    assert REGIONS.is_profile_code(code) is known
+
+
+# 해당 없음(제한없음)은 특정 대상 전용 정책을 빼고, 기타는 그 조건으로 거르지 않음
+def test_other_profile_code_is_not_filtered():
+    profile = Profile(job_code="0013009", school_code="0049009", major_code="0011008", special_target_code="0014010")
+    names = {"0013009": "기타", "0049009": "기타", "0011008": "기타", "0014010": "제한없음"}
+
+    conditions = build_conditions(_analysis(_sub()), profile, REGIONS, names)
+
+    assert conditions.to_filter().eligibility_codes == {"SPECIAL": "0014010"}
+
+
 def test_profile_conditions_used_when_question_has_none():
     conditions = build_conditions(_analysis(_sub()), PROFILE, REGIONS, CODE_NAMES)
 

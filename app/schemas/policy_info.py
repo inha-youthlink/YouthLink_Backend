@@ -3,6 +3,8 @@ from datetime import date, datetime
 from enum import StrEnum
 from zoneinfo import ZoneInfo
 
+from app.schemas.analysis import Category
+
 ALWAYS_OPEN_CODE = "0057002"
 CLOSED_CODE = "0057003"
 
@@ -10,6 +12,16 @@ KST = ZoneInfo("Asia/Seoul")
 
 # URL 칸에 "전화문의", "-" 같은 글자가 들어 있는 경우가 있어 주소 모양일 때만 링크로 씀
 DOMAIN_LIKE = re.compile(r"[\w-]+(\.[\w-]+)+(/\S*)?", re.ASCII)
+
+# 정책 대분류에 옛 분류와 새 분류가 섞여 있어 둘 다 맞춤. 검색 가산점과 카드 분류가 함께 씀
+CATEGORY_NAMES = {
+    Category.JOB: frozenset({"일자리"}),
+    Category.HOUSING: frozenset({"주거"}),
+    Category.EDUCATION: frozenset({"교육･직업훈련", "교육"}),
+    Category.WELFARE_CULTURE: frozenset({"금융･복지･문화", "복지문화"}),
+    Category.PARTICIPATION: frozenset({"참여･기반", "참여권리"}),
+}
+_CATEGORY_BY_NAME = {name: category for category, names in CATEGORY_NAMES.items() for name in names}
 
 
 class ApplicationStatus(StrEnum):
@@ -42,6 +54,11 @@ def application_status(
     if start is not None and start > today:
         return ApplicationStatus.UPCOMING
     return ApplicationStatus.OPEN
+
+
+# 카드에는 분류가 하나라 대분류가 여러 개면 첫 번째를 씀. 대분류가 없으면 지어내지 않고 None
+def category_of(large_categories: list[str]) -> Category | None:
+    return next((_CATEGORY_BY_NAME[name] for name in large_categories if name in _CATEGORY_BY_NAME), None)
 
 
 def clean_url(value: str | None) -> str | None:

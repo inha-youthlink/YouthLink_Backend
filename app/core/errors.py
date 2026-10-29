@@ -27,6 +27,7 @@ _VALIDATION_REASONS = {
     "int_type": "정수여야 합니다.",
     "string_type": "문자열이어야 합니다.",
     "uuid_parsing": "UUID 형식이어야 합니다.",
+    "enum": "허용된 값이 아닙니다.",
     "json_invalid": "JSON 형식이 올바르지 않습니다.",
 }
 _DEFAULT_REASON = "형식이 올바르지 않습니다."
@@ -57,6 +58,17 @@ class InvalidClientIdError(ApiError):
 class ForbiddenOriginError(ApiError):
     def __init__(self) -> None:
         super().__init__(status.HTTP_403_FORBIDDEN, "FORBIDDEN", "허용되지 않은 접근입니다.")
+
+
+# 요청 형식은 맞지만 DB를 봐야 알 수 있는 값 오류. 형식 오류(422 변환)와 같은 모양으로 보냄
+class ValidationFailedError(ApiError):
+    def __init__(self, field: str, reason: str) -> None:
+        super().__init__(
+            status.HTTP_400_BAD_REQUEST,
+            "VALIDATION_FAILED",
+            "입력값을 확인해 주세요.",
+            [ErrorDetail(field=field, reason=reason)],
+        )
 
 
 # 다른 사용자의 세션이 있는지 숨기려고 없는 경우와 같은 응답을 씀

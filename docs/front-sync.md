@@ -1,13 +1,13 @@
 # 프론트 연동 현황 (임시 문서)
 
-- 기준: 2026-10-26, 백엔드 `main` (공개 API 1-1 #38, 배포 준비 PR)
+- 기준: 2026-10-29, 백엔드 `main` (공개 API 1-1 #38, 배포 준비 #39, 공개 API 1-2 프로필·카드 형식)
 - 범위: 지금 백엔드 서버가 실제로 어디까지 되는지와 임시 형식. **약속(계약)은 [api-contract.md](api-contract.md)**, 이 문서는 구현 현황만 적는다
 - 계약 본문(4절)이 채워지고 실연동이 끝나면 이 문서는 지운다
 
 ## 1. 지금 되는 것
 | API | 상태 | 비고 |
 |---|---|---|
-| `POST /api/sessions` | 됨 | 프로필은 임시 형식 (3절) |
+| `POST /api/sessions` | 됨 | 프로필은 계약 형식 (계약 4.2), 과도기 호환 (3절) |
 | `GET /api/sessions` | 됨 | 만든 시각 내림차순, `Cache-Control: no-store` |
 | `GET /api/sessions/{id}` | 됨 | |
 | `GET /api/sessions/{id}/messages` | 됨 | 오래된 순. 질문의 `policies`는 `null`, 카드 없는 답변은 `[]`. `clientMessageId`는 아직 항상 `null` |
@@ -50,14 +50,16 @@ curl -N -X POST <주소>/api/sessions/<id>/chat \
 
 백엔드 로컬 확인 결과: 첫 token 15.00초, 간격 중앙값·최대 1.00초, ping 최대 간격 15.00초, `policies` → `done`으로 끝남. 연결을 중간에 끊으면 서버가 바로 멈춤
 
-## 3. 임시 형식 (회의 뒤 바뀜)
-| 항목 | 지금 | 바뀔 방향 |
+## 3. 형식과 과도기 호환
+세션·카드는 계약 4절(v0.6) 형식. 프론트가 아직 v0.3 형식이어도 첫 실연동이 깨지지 않게 아래를 함께 받거나 보냄 (계약 4.6, 프론트가 바뀌면 지움)
+
+| 항목 | 지금 | 프론트가 할 일 |
 |---|---|---|
-| 세션 생성 `profile` | 백엔드 DB 코드 그대로, 모두 선택, snake_case (`{"age": 27, "region_code": "11680", "job_code": "0013003", …}`) | 계약 enum(H2)과 지역 코드(H3), 8항목 필수·나이 15~39 검증 |
-| 응답의 `profile` | 위와 같은 형식 | 위와 같음 |
-| `ChatSession.category` | 없음 | B3 결과에 따라 |
-| 첫 질문 전 `title` | `"새 대화"` | 그대로 (B3 제안) |
-| 카드 (`policies`) | `id`, `title`, `applyStart`, `applyEnd`, `status`, `regionLabel`, `organization`, `sourceUrl` | 계약 B5~B7 합의대로. `category`는 H1 뒤 |
+| 세션 생성 `profile` | 계약 enum 8항목 필수 (`{"region": "11680", "maritalStatus": "SINGLE", "age": 27, "annualIncome": 3000, "education": "COLLEGE_GRADUATED", "major": "ENGINEERING", "employmentStatus": "UNEMPLOYED", "specialField": "NONE"}`). `region`에 v0.3 시도 enum(`SEOUL`)을 보내도 받음 (`"11000"`으로 저장) | 시군구 선택은 지역 목록 API(B2) 뒤 |
+| 응답의 `profile` | 같은 형식. `region`은 5자리 코드 (`SEOUL`로 만들었으면 `"11000"`) | 헤더의 지역 표시를 5자리 코드 기준으로 |
+| 세션 `category` | 받지 않음 (보내도 무시), 응답에도 없음 (B3) | 세션 생성 화면의 분야 선택 제거 |
+| 첫 질문 전 `title` | `"새 대화"` | |
+| 카드 (`policies`) | `id`, `title`, `category`, `applyStart`, `applyEnd`, `status`, `regionLabel`, `organization`, `sourceUrl` + 과도기 `region` (v0.3 시도 enum 또는 `NATIONWIDE`) | 카드 검사(`isPolicySummary`)를 `regionLabel` 기준으로, `category`가 `null`일 수 있음 (대분류 없는 정책 1건) |
 
 ## 4. 다음 (백엔드)
 - 서버 주소(R1): 인프라 담당자가 띄우면 이 문서에 추가 (배포 방법은 [deploy.md](deploy.md))
