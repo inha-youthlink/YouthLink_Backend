@@ -3,11 +3,13 @@ from uuid import UUID
 
 from app.core.dependencies import PipelineDeps
 from app.core.errors import SessionNotFoundError
+from app.pipeline.conditions import RegionIndex
 from app.pipeline.runner import run_pipeline
 from app.repositories.chat_repository import ChatRepository, RoomRecord
 from app.schemas.chat import SendMessageRequest, SendMessageResponse
-from app.schemas.pipeline import PUBLIC_TRACE_KEYS, PipelineInput, PipelineOutput, Profile
-from app.schemas.session import ChatSession, Message, PolicySummary
+from app.schemas.pipeline import PUBLIC_TRACE_KEYS, PipelineInput, PipelineOutput
+from app.schemas.session import ChatSession, Message, PolicySummary, SessionProfileRequest
+from app.services.profile_codes import to_profile, to_session_profile
 
 # 청크 ID는 ETL이 청크를 다시 만들면 바뀔 수 있어 정책 번호·종류·인덱스로 청크를 남김
 CHUNK_METADATA_KEYS = ("policy_no", "chunk_type", "chunk_index", "score")
@@ -22,8 +24,10 @@ class ChatService:
         self._chat_repository = chat_repository
         self._pipeline_deps = pipeline_deps
 
-    async def create_session(self, client_id: str, profile: Profile) -> ChatSession:
-        room_id = await self._chat_repository.create_room(client_id, profile)
+    # 파이프라인과 /internal은 DB 코드 Profile을 그대로 쓰고, 계약 형식과의 변환은 여기서만 함
+    async def create_session(self, client_id: str, request: SessionProfileRequest) -> ChatSession:
+        regions = RegionIndex(await self._pipeline_deps.policy_repository.list_regions())
+        room_id = await self._chat_repository.create_room(client_id, to_profile(request, regions))
         # 생성 시각은 DB가 정해 다시 읽음
         return _chat_session(await self._get_owned_room(room_id, client_id))
 
@@ -110,7 +114,7 @@ def _chat_session(room: RoomRecord) -> ChatSession:
     return ChatSession(
         id=room.room_id,
         title=room.title or DEFAULT_SESSION_TITLE,
-        profile=room.profile,
+        profile=to_session_profile(room.profile),
         created_at=room.created_at,
     )
 

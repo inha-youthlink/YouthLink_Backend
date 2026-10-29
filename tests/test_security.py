@@ -7,8 +7,7 @@ from app.api.sessions import get_chat_service
 from app.core.config import get_settings
 from app.core.middleware import SECURITY_HEADERS, BodySizeLimitMiddleware
 from app.main import app
-from app.services.chat_service import ChatService
-from tests.test_sessions_api import HEADERS, FakeChatRepository
+from tests.test_sessions_api import HEADERS, PROFILE, FakeChatRepository, make_service
 
 ORIGIN_SECRET = "o" * 43
 
@@ -16,7 +15,7 @@ ORIGIN_SECRET = "o" * 43
 @pytest.fixture
 def client():
     repo = FakeChatRepository()
-    app.dependency_overrides[get_chat_service] = lambda: ChatService(repo, None)
+    app.dependency_overrides[get_chat_service] = lambda: make_service(repo)
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -36,7 +35,7 @@ def test_security_headers(client, path):
 
 def test_security_headers_keep_sse_headers(client):
     _use_settings(chat_skeleton_first_delay=0, chat_skeleton_tokens=1)
-    session_id = client.post("/api/sessions", json={}, headers=HEADERS).json()["id"]
+    session_id = client.post("/api/sessions", json={"profile": PROFILE}, headers=HEADERS).json()["id"]
 
     response = client.post(
         f"/api/sessions/{session_id}/chat",
