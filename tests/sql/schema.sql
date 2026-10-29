@@ -1,12 +1,13 @@
 -- ETL 저장소 db/schema.sql 복사본 (youthlink-data-pipeline 7680c67, PR #5, 008 반영)
 -- 테스트 DB 구성용. ETL 원본이 바뀌면 함께 갱신함
+-- 임베딩 Titan v2·1024차원은 ETL보다 먼저 반영함 (ETL 변경 뒤 원본으로 다시 복사)
 
 -- YouthLink Prototype Database Schema
 -- PostgreSQL + pgvector
 --
 -- Embedding model:
---   text-embedding-3-small
---   dimension: 1536
+--   bedrock-titan-embed-v2
+--   dimension: 1024
 --   distance: cosine
 --
 -- Run db/extensions.sql before this file.
@@ -219,7 +220,7 @@ CREATE TABLE IF NOT EXISTS policy_chunk (
     chunker_version     VARCHAR(50) NOT NULL,
     token_count         INTEGER,
 
-    embedding           VECTOR(1536),
+    embedding           VECTOR(1024),
     embedding_model     VARCHAR(100),
     embedded_at         TIMESTAMPTZ,
     embedding_error     TEXT,
