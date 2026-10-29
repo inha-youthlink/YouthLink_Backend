@@ -45,10 +45,12 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: SecretStr
+    # 비우면 OpenAI에 바로 붙음. 운영은 Bedrock 게이트웨이 주소
+    openai_base_url: str | None = None
     openai_timeout: float = 30.0
     openai_max_retries: int = 2
-    embedding_model: str = "text-embedding-3-small"
-    chat_model: str = "gpt-6-luna"
+    embedding_model: str = "bedrock-titan-embed-v2"
+    chat_model: str = "bedrock-gpt-5.6-luna"
 
     # PostgreSQL
     database_url: SecretStr

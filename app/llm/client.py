@@ -40,6 +40,7 @@ class LLMClient:
     def from_settings(cls, settings: Settings) -> "LLMClient":
         client = AsyncOpenAI(
             api_key=settings.openai_api_key.get_secret_value(),
+            base_url=settings.openai_base_url,
             timeout=settings.openai_timeout,
             max_retries=settings.openai_max_retries,
         )
