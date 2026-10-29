@@ -1,9 +1,9 @@
 from datetime import date
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, StringConstraints
 
 from app.schemas.analysis import Category
 from app.schemas.chat import QUESTION_MAX_CHARS
@@ -182,7 +182,7 @@ def legacy_card_region(region_label: str | None) -> str:
 
 class Message(PublicModel):
     id: str
-    # 멱등 처리(계약 R6)에서 저장하기 전까지는 항상 null
+    # 질문에만 있음 (계약 R6). 프론트가 먼저 그린 말풍선과 저장된 이력을 맞추는 데 씀
     client_message_id: str | None = None
     role: Literal["user", "assistant"]
     content: str
@@ -191,6 +191,7 @@ class Message(PublicModel):
 
 
 class ChatRequest(PublicModel):
-    # 재시도 때 같은 값을 보내는 멱등 키 (계약 §5.3). 뼈대는 형식만 검사함
+    # 재시도 때 같은 값을 보내는 멱등 키 (계약 §5.3)
     client_message_id: UUID
-    content: str = Field(min_length=1, max_length=QUESTION_MAX_CHARS)
+    # 공백만 있는 질문은 LLM을 불러도 답할 수 없어 앞뒤 공백을 지운 뒤 길이를 봄. 저장·재시도 비교도 지운 값으로 함
+    content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=QUESTION_MAX_CHARS)]

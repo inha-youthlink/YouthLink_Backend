@@ -28,7 +28,8 @@
 | `TRUST_PROXY_HEADERS` | 비움 (기본 `true`) | Vercel 뒤라 `X-Forwarded-For` 첫 값을 사용자 IP로 봄. 끄면 모든 사용자가 Vercel IP 하나로 묶여 요청 제한에 같이 걸림 |
 | `RATE_LIMIT_PER_MINUTE` 등 | 비움 (기본값) | 요청 제한. `0`이면 끔 (3절) |
 | `ORIGIN_SECRET` | 비움 (나중에) | Vercel이 붙이는 `X-Origin-Secret` 값. 켜면 서버로 직접 오는 `/api` 요청을 403으로 막음. Vercel 쪽에서 헤더를 붙일 수 있을 때만 |
-| `CHAT_SKELETON_*` | 비움 | 채팅 뼈대의 대기·길이 (SSE 검증용) |
+| `CHAT_SKELETON_ENABLED` | 비움 (기본 `false`) | `true`면 `/chat`이 실제 답변 대신 뼈대(고정 문장, 저장 안 함)로 답함. 배포 경로 SSE 확인(R2) 때만 켜고 끝나면 끔 |
+| `CHAT_SKELETON_*` (나머지) | 비움 | 채팅 뼈대의 대기·길이 |
 
 - **env 파일은 값 뒤에 주석을 쓰면 안 됩니다.** Docker `--env-file` 같은 도구는 `KEY=값  # 메모`의 `# 메모`까지 값으로 읽습니다. 주석은 윗줄에 씁니다 (`.env.example` 형식)
 - 설정이 틀리면(숫자 칸에 글자, `prod`인데 키 없음 등) 서버가 이유를 출력하고 멈춥니다. 오류 출력에 설정 값은 찍히지 않습니다
@@ -44,7 +45,7 @@
 | 본문 크기 | 256KB 넘으면 `413` |
 | 응답 헤더 | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Content-Security-Policy` |
 
-- 횟수는 메모리에 있어 **프로세스를 새로 띄우면 0부터** 셉니다
+- 횟수와 채팅 "답변 생성 중" 표시는 메모리에 있어 **프로세스를 새로 띄우면 초기화**됩니다 (워커 하나여야 하는 이유)
 - OpenAI 계정의 월 예산 상한은 키 관리자가 따로 설정합니다 (모든 방어가 뚫려도 비용이 멈추는 마지막 장치)
 
 ## 4. 프록시(Nginx 등)를 앞에 둘 때

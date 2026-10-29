@@ -1,6 +1,5 @@
 import uuid
-from datetime import UTC, date, datetime, timedelta
-from types import SimpleNamespace
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,70 +7,19 @@ from fastapi.testclient import TestClient
 from app.api.sessions import get_chat_service
 from app.main import app
 from app.repositories.chat_repository import RoomRecord
-from app.repositories.policy_repository import RegionRow
 from app.schemas.analysis import Category
 from app.schemas.chat import MessageItem
 from app.schemas.pipeline import PolicyItem, Profile
 from app.schemas.policy_info import ApplicationStatus
-from app.services.chat_service import ChatService
-
-CLIENT_ID = "6f1c2b9e-3d4a-4c8b-9f2e-1a2b3c4d5e6f"
-OTHER_CLIENT_ID = "0b6a4b1e-8d1f-4f5e-a2c3-9e8d7c6b5a40"
-HEADERS = {"X-Client-Id": CLIENT_ID}
-CREATED_AT = datetime(2026, 10, 25, 3, 0, tzinfo=UTC)
-
-# 계약 형식 프로필 (8항목 필수)
-PROFILE = {
-    "region": "11680",
-    "maritalStatus": "SINGLE",
-    "age": 27,
-    "annualIncome": 3000,
-    "education": "COLLEGE_GRADUATED",
-    "major": "ENGINEERING",
-    "employmentStatus": "UNEMPLOYED",
-    "specialField": "NONE",
-}
-REGIONS = [
-    RegionRow("11", "서울특별시", "종로구", "11110"),
-    RegionRow("11", "서울특별시", "강남구", "11680"),
-    RegionRow("41", "경기도", "수원시 장안구", "41111"),
-    RegionRow("41", "경기도", "수원시 권선구", "41113"),
-]
-
-
-class FakePolicyRepository:
-    async def list_regions(self) -> list[RegionRow]:
-        return REGIONS
-
-
-def make_service(repo: "FakeChatRepository") -> ChatService:
-    return ChatService(repo, SimpleNamespace(policy_repository=FakePolicyRepository()))
-
-
-class FakeChatRepository:
-    def __init__(self) -> None:
-        self.rooms: dict[uuid.UUID, RoomRecord] = {}
-        self.messages: dict[uuid.UUID, list[MessageItem]] = {}
-        self.refs: dict[int, list[PolicyItem]] = {}
-
-    async def create_room(self, user_id: str, profile: Profile) -> uuid.UUID:
-        room_id = uuid.uuid4()
-        created_at = CREATED_AT + timedelta(minutes=len(self.rooms))
-        self.rooms[room_id] = RoomRecord(room_id, user_id, None, created_at, profile)
-        return room_id
-
-    async def get_room(self, room_id: uuid.UUID) -> RoomRecord | None:
-        return self.rooms.get(room_id)
-
-    async def list_rooms(self, user_id: str) -> list[RoomRecord]:
-        rooms = [room for room in self.rooms.values() if room.user_id == user_id]
-        return sorted(rooms, key=lambda room: room.created_at, reverse=True)
-
-    async def list_messages(self, room_id: uuid.UUID) -> list[MessageItem]:
-        return self.messages.get(room_id, [])
-
-    async def list_policy_refs(self, message_ids: list[int]) -> dict[int, list[PolicyItem]]:
-        return {message_id: self.refs[message_id] for message_id in message_ids if message_id in self.refs}
+from tests.conftest import (
+    CLIENT_ID,
+    CREATED_AT,
+    HEADERS,
+    OTHER_CLIENT_ID,
+    PROFILE,
+    FakeChatRepository,
+    make_service,
+)
 
 
 @pytest.fixture

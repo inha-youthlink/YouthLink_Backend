@@ -18,17 +18,18 @@ def _policy(policy_no: str, score: float) -> PolicyItem:
     return PolicyItem(policy_no=policy_no, policy_name="응답용 이름", score=score)
 
 
+# 채팅 한 번: 질문을 먼저 저장하고 답변이 끝나면 답변을 저장함
 async def _save_turn(
     repo: ChatRepository, room_id, question: str, policies=(), metadata=None, current_policies=()
 ) -> int:
-    return await repo.save_turn(
+    question_id = await repo.save_question(room_id, uuid.uuid4(), question, f"{question} 제목")
+    return await repo.save_answer(
         room_id=room_id,
-        question=question,
+        question_id=question_id,
         answer=f"{question} 답변",
         answer_metadata=metadata or {},
         policies=list(policies),
         current_policies=list(current_policies),
-        room_title=f"{question} 제목",
     )
 
 
@@ -53,7 +54,6 @@ async def test_get_missing_room(chat_repository):
     assert await chat_repository.get_room(uuid.uuid4()) is None
 
 
-# 같은 트랜잭션의 질문·답변은 created_at이 같아 message_id 순서가 깨지지 않는지 확인함
 async def test_messages_keep_order(chat_repository):
     room_id = await chat_repository.create_room(USER_ID, Profile())
     await _save_turn(chat_repository, room_id, "질문1")
@@ -67,7 +67,8 @@ async def test_messages_keep_order(chat_repository):
         ("user", "질문2"),
         ("assistant", "질문2 답변"),
     ]
-    assert messages[0].created_at == messages[1].created_at
+    # 재시도 키는 질문에만 있음
+    assert [m.client_message_id is not None for m in messages] == [True, False, True, False]
 
 
 # 점수 순서가 아니라 저장한 카드 순서로 복원되는지 보려고 낮은 점수를 앞에 둠
@@ -195,8 +196,8 @@ async def test_room_title_set_on_first_turn_only(chat_repository):
     assert [room.title for room in rooms] == ["질문1 제목"]
 
 
-# 정책 저장이 실패하면 이미 넣은 질문·답변까지 취소되어야 함 (한 턴 한 트랜잭션)
-async def test_save_turn_rolls_back_on_failure(chat_repository):
+# 정책 저장이 실패하면 답변도 취소되고, 먼저 저장한 질문은 남아 재시도 때 답변만 만듦
+async def test_save_answer_rolls_back_on_failure(chat_repository):
     room_id = await chat_repository.create_room(USER_ID, Profile())
     await _save_turn(chat_repository, room_id, "질문1")
 
@@ -204,7 +205,7 @@ async def test_save_turn_rolls_back_on_failure(chat_repository):
         await _save_turn(chat_repository, room_id, "질문2", policies=[_policy("NOT-EXISTS", 0.5)])
 
     messages = await chat_repository.list_messages(room_id)
-    assert [m.content for m in messages] == ["질문1", "질문1 답변"]
+    assert [m.content for m in messages] == ["질문1", "질문1 답변", "질문2"]
 
 
 # 회원 탈퇴 시 채팅방 삭제 한 번으로 하위 데이터가 모두 지워지는 전제를 확인함
@@ -314,7 +315,7 @@ async def test_save_turn_replaces_and_clears_current_policies(chat_repository):
     assert [p.policy_no for p in await chat_repository.list_current_policies(other_id)] == [TEST_POLICY_NOS[0]]
 
 
-# 턴 저장이 실패하면 현재 정책 교체도 함께 취소되어야 함
+# 답변 저장이 실패하면 현재 정책 교체도 함께 취소되어야 함
 async def test_current_policies_roll_back_with_turn(chat_repository):
     room_id = await chat_repository.create_room(USER_ID, Profile())
     await _save_turn(chat_repository, room_id, "질문1", current_policies=[_ref(TEST_POLICY_NOS[0])])
@@ -323,3 +324,53 @@ async def test_current_policies_roll_back_with_turn(chat_repository):
         await _save_turn(chat_repository, room_id, "질문2", current_policies=[_ref("NOT-EXISTS")])
 
     assert [p.policy_no for p in await chat_repository.list_current_policies(room_id)] == [TEST_POLICY_NOS[0]]
+
+
+# 답변 없이 남은 질문(연결 끊김, 생성 실패)은 대화 기록에서 빠지고 앞뒤 턴의 짝이 어긋나지 않음
+async def test_recent_turns_skip_unanswered_question(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    await _save_turn(chat_repository, room_id, "질문1")
+    await chat_repository.save_question(room_id, uuid.uuid4(), "끊긴 질문", "제목")
+    await _save_turn(chat_repository, room_id, "질문3")
+
+    turns = await chat_repository.list_recent_turns(room_id, turns=3)
+
+    assert [(t.question, t.answer) for t in turns] == [("질문1", "질문1 답변"), ("질문3", "질문3 답변")]
+
+
+async def test_find_question_by_client_message_id(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    other_id = await chat_repository.create_room(USER_ID, Profile())
+    answered, waiting = uuid.uuid4(), uuid.uuid4()
+    question_id = await chat_repository.save_question(room_id, answered, "질문1", "제목")
+    answer_id = await chat_repository.save_answer(room_id, question_id, "답변1", {}, [], [])
+    waiting_id = await chat_repository.save_question(room_id, waiting, "질문2", "제목")
+
+    found = await chat_repository.find_question(room_id, answered)
+    assert (found.message_id, found.content, found.answer_id, found.answer) == (question_id, "질문1", answer_id, "답변1")
+    # 답변 없이 남은 질문
+    found = await chat_repository.find_question(room_id, waiting)
+    assert (found.message_id, found.answer_id, found.answer) == (waiting_id, None, None)
+    # 키는 대화방 안에서만 찾음
+    assert await chat_repository.find_question(other_id, answered) is None
+    assert await chat_repository.find_question(room_id, uuid.uuid4()) is None
+
+
+async def test_same_client_message_id_rejected_in_room(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    other_id = await chat_repository.create_room(USER_ID, Profile())
+    key = uuid.uuid4()
+    await chat_repository.save_question(room_id, key, "질문", "제목")
+    await chat_repository.save_question(other_id, key, "질문", "제목")
+
+    with pytest.raises(IntegrityError):
+        await chat_repository.save_question(room_id, key, "질문", "제목")
+
+
+# 첫 답변이 실패해도 목록에서 질문으로 보이도록 제목은 질문을 저장할 때 정함
+async def test_room_title_set_when_question_saved(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+
+    await chat_repository.save_question(room_id, uuid.uuid4(), "질문1", "질문1 제목")
+
+    assert (await chat_repository.get_room(room_id)).title == "질문1 제목"

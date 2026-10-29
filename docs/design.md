@@ -271,27 +271,30 @@ POST /internal/pipeline   PipelineInput → PipelineOutput (저장 없음)
 - 프로필·카드 (계약 v0.6 4절): 세션 프로필은 계약 enum 8항목 필수, `services/profile_codes.py`에서 DB 코드 `Profile`로 바꿔 저장하고 응답은 다시 계약 형식으로. 모르는 지역 코드는 세션을 만들 때 400. 세션 `category` 없음(B3). 카드에 `category`(H1, 정책 대분류 첫 번째)
 - 과도기 호환 (계약 4.6, 프론트가 바뀌면 지움): 프로필 `region`의 시도 enum, 세션 생성의 `category` 무시, 카드의 v0.3 `region`
 - 파이프라인 스트리밍 (1-2): `stream_pipeline()`이 카드 → 본문 조각 → `PipelineOutput` 순서로 내보냄 (B9). 답변 첫 줄 `[소개: …]`를 받는 즉시 카드를 정하고, 40자가 넘도록 줄바꿈이 없으면 카드 줄이 아니라고 봄. `/internal`의 `run_pipeline()`은 같은 스트림을 모아 한 번에 돌려줘 결과·trace가 같음. trace `latency_ms.first_token` 추가 (질문을 받고 첫 본문 조각까지)
-- 남음(1-2): `/chat`에 스트림 연결(뼈대는 설정으로 남김), `clientMessageId` 멱등 처리(ETL 009), 연결 끊김 시 생성 취소, 스트림 중 `error` 이벤트
+- 채팅 연결 (1-2): `/chat`이 `stream_pipeline()`을 SSE로 보냄 (`policies`는 카드가 있을 때만). 질문은 스트림 전에 저장, 답변·카드·현재 정책은 `done` 직전에 한 트랜잭션. `clientMessageId` 멱등 처리(계약 §5.3, 다시 보내기도 B9 순서), 세션 단위 메모리 잠금(`409 STREAM_IN_PROGRESS`, 해제 못 한 잠금은 5분 뒤 만료). 연결이 끊기면 각 층의 스트림을 `aclosing`으로 바로 닫아 LLM 스트림까지 멈춤. 스트림 중 실패는 `error` 이벤트(`RAG_TIMEOUT`/`RAG_UPSTREAM_ERROR`/`INTERNAL_ERROR`). 하루 LLM 상한은 실제 생성 때만 셈. 뼈대는 `CHAT_SKELETON_ENABLED=true`일 때만 (R2 확인 뒤 삭제)
 
 ---
 
 ## 5. 채팅 데이터 모델 (ETL 담당 ERD 기준)
 
-### 5-1. 현재 ERD (ETL 마이그레이션 008 반영, 6주차)
+### 5-1. 현재 ERD (ETL 마이그레이션 009 반영, 9주차)
 ```
 chat_room            room_id(UUID), user_id, title, created_at, updated_at
                      인덱스 (user_id, updated_at DESC)
 chat_profile         room_id(PK,FK), age, gender, region_code, marriage_status_code,
                      annual_income, major_code, job_code, school_code,
                      special_target_code, extra_profile(JSONB), updated_at
-chat_message         message_id(BIGINT), room_id(FK), role, content, metadata(JSONB), created_at
+chat_message         message_id(BIGINT), room_id(FK), role, content, metadata(JSONB), created_at,
+                     client_message_id(UUID, 질문만), reply_to_message_id(FK, 답변만)
+                     UNIQUE (room_id, client_message_id)
 message_policy_ref   message_id(PK,FK), policy_no(PK,FK), relevance_score, display_order
                      UNIQUE (message_id, display_order), display_order >= 1
 chat_current_policy  room_id(PK,FK), policy_no(PK,FK), display_order    ← 7주차부터 갱신
+policy_scrap         user_id(PK), policy_no(PK,FK), created_at          ← 9주차 (스크랩 API는 공개 API 2)
 ```
 - `message_policy_ref`가 답변에 보여준 정책과 순서를 저장 → 대화 상태의 "직전에 보여준 정책 목록"으로 사용
 - `chat_message.metadata`: 질문은 사용자가 보낸 것(버튼 입력 등, 6주차는 `{}`), 답변은 만든 과정(가벼운 trace 키 + `retrieved_chunks`의 `policy_no`·`chunk_type`·`chunk_index`·`score`). 근거 원문은 저장하지 않음
-- 한 턴(질문, 답변, 정책, `updated_at`)은 답변까지 성공한 뒤 한 트랜잭션으로 저장. 같은 턴의 메시지는 `created_at`이 같아 순서는 `message_id`로 보장
+- 질문은 답변 생성 전에 저장(첫 질문이면 제목도 이때)하고, 답변·정책·현재 정책·`updated_at`은 답변이 끝난 뒤 한 트랜잭션으로 저장 (9주차, 연결이 끊겨도 질문은 남게). 질문과 답변의 짝은 메시지 순서가 아니라 `reply_to_message_id`로 찾고, 답변 없이 남은 질문은 대화 기록에서 빠짐. 순서는 `message_id`로 보장
 
 ### 5-2. 추가 확인 필요
 - 마감 정책을 삭제하는지 보관하는지 (`message_policy_ref`가 `policy`를 FK로 참조). 6주차 확인: ETL은 정책을 삭제하지 않음 (사라진 정책 비활성화도 미구현). 삭제하면 과거 대화의 정책 연결도 CASCADE로 사라지므로 비활성화가 유리 (ETL PR #5에 전달)

@@ -71,6 +71,22 @@ class ValidationFailedError(ApiError):
         )
 
 
+# 세션 하나에는 답변 생성을 하나만 둠 (계약 §1.4·§5.3)
+class StreamInProgressError(ApiError):
+    def __init__(self) -> None:
+        super().__init__(
+            status.HTTP_409_CONFLICT, "STREAM_IN_PROGRESS", "이전 질문의 답변을 만들고 있어요. 잠시 후 다시 시도해 주세요."
+        )
+
+
+# 재시도 키(clientMessageId)는 같은데 질문이 다르면 어느 쪽이 맞는지 알 수 없음 (계약 §5.3)
+class IdempotencyConflictError(ApiError):
+    def __init__(self) -> None:
+        super().__init__(
+            status.HTTP_409_CONFLICT, "IDEMPOTENCY_CONFLICT", "같은 메시지 ID로 다른 질문을 보낼 수 없습니다."
+        )
+
+
 # 다른 사용자의 세션이 있는지 숨기려고 없는 경우와 같은 응답을 씀
 class SessionNotFoundError(ApiError):
     def __init__(self) -> None:

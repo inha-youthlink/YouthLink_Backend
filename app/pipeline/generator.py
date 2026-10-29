@@ -1,5 +1,6 @@
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import date
 
@@ -85,7 +86,7 @@ class AnswerDelta:
 type GenerationEvent = CardsDecided | AnswerDelta | GenerationResult
 
 
-async def generate_stream(ctx: PipelineContext) -> AsyncIterator[GenerationEvent]:
+async def generate_stream(ctx: PipelineContext) -> AsyncGenerator[GenerationEvent, None]:
     evidence = ctx.evidence
     all_cards = list(range(1, len(evidence.candidates) + 1))
     if evidence.reply is not None:
@@ -119,21 +120,23 @@ async def generate_stream(ctx: PipelineContext) -> AsyncIterator[GenerationEvent
     body = _Body()
     usage = ChatUsage(prompt_tokens=0, completion_tokens=0)
 
-    async for piece in ctx.deps.llm.chat_stream(messages):
-        if isinstance(piece, ChatUsage):
-            usage = piece
-            continue
-        if waiting_card_line:
-            head += piece
-            decided = _decide_card_line(head, len(contexts))
-            if decided is None:
+    # 받는 쪽이 중간에 닫으면 LLM 스트림도 바로 닫힘 (연결 끊김 시 생성 취소)
+    async with aclosing(ctx.deps.llm.chat_stream(messages)) as pieces:
+        async for piece in pieces:
+            if isinstance(piece, ChatUsage):
+                usage = piece
                 continue
-            waiting_card_line, numbers = False, decided.numbers
-            yield CardsDecided(numbers)
-            piece = decided.body
-        text = body.feed(piece)
-        if text:
-            yield AnswerDelta(text)
+            if waiting_card_line:
+                head += piece
+                decided = _decide_card_line(head, len(contexts))
+                if decided is None:
+                    continue
+                waiting_card_line, numbers = False, decided.numbers
+                yield CardsDecided(numbers)
+                piece = decided.body
+            text = body.feed(piece)
+            if text:
+                yield AnswerDelta(text)
 
     # 첫 줄 판단 전에 끝난 짧은 답변("[소개: 1]"만 있거나 줄바꿈 없는 한 줄)은 한 번에 받을 때와 같이 파싱함
     if waiting_card_line:

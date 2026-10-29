@@ -10,8 +10,8 @@
 | `POST /api/sessions` | 됨 | 프로필은 계약 형식 (계약 4.2), 과도기 호환 (3절) |
 | `GET /api/sessions` | 됨 | 만든 시각 내림차순, `Cache-Control: no-store` |
 | `GET /api/sessions/{id}` | 됨 | |
-| `GET /api/sessions/{id}/messages` | 됨 | 오래된 순. 질문의 `policies`는 `null`, 카드 없는 답변은 `[]`. `clientMessageId`는 아직 항상 `null` |
-| `POST /api/sessions/{id}/chat` | **뼈대** | RAG 없이 고정 문장 (2절). 저장하지 않음 |
+| `GET /api/sessions/{id}/messages` | 됨 | 오래된 순. 질문의 `policies`는 `null`, 카드 없는 답변은 `[]`. 질문에는 보낸 `clientMessageId`가 있음 (답변은 `null`). 연결이 끊기거나 생성이 실패한 질문은 답변 없이 남음 |
+| `POST /api/sessions/{id}/chat` | **됨 (실제 RAG)** | 2절. 배포 경로 SSE 확인용 뼈대는 서버 설정으로만 켬 (2-1) |
 | 요약·추천, 정책 검색·상세, 스크랩, 가이드 PDF | 아직 | mock 유지 |
 
 공통 규칙은 계약대로 동작함
@@ -27,11 +27,32 @@
 - 모든 응답에 `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` (Step 4 CSP 요청)
 - 나중에 켤 수 있음: Vercel이 `/api` 요청에 비밀 헤더 `X-Origin-Secret`을 붙이면 EC2로 직접 오는 요청을 `403 FORBIDDEN`으로 막음. `vercel.json` rewrite만으로 요청 헤더를 붙일 수 있는지 프론트 확인이 필요함 (SSE 검증이 끝난 뒤)
 
-## 2. SSE 검증 (R2)
-더미 `POST /api/health/stream`은 만들지 않았다. 채팅 API 뼈대로 검증한다.
+## 2. 채팅 (`POST /api/sessions/{id}/chat`)
+**이벤트 순서**
+- 답변: `policies`(카드가 있을 때만) → `token`들 → `done`. 카드는 항상 첫 `token` 바로 앞 (B9). 인사·조건 되묻기처럼 카드가 없는 답변은 `policies` 없이 `token` → `done`
+- `done`의 `messageId`는 저장된 답변 id (`GET …/messages`의 `id`와 같음)
+- 질문 `content`는 앞뒤 공백을 지운 값으로 저장. 공백만 있으면 `400 VALIDATION_FAILED`
+
+**같은 `clientMessageId`로 다시 보낼 때** (계약 §5.3)
+| 서버 상태 | 응답 |
+|---|---|
+| 처음 보는 키 | 질문 저장 → 답변 생성 |
+| 질문만 있음 (이전에 끊김·실패) | 질문은 다시 저장하지 않고 답변만 생성 |
+| 답변까지 있음 (`done`을 못 받은 경우) | 새로 만들지 않고 저장된 답변을 같은 순서로: `policies`(있으면) → `token` 1개(전체 답변) → 기존 `messageId`의 `done` |
+| 키는 같은데 `content`가 다름 | `409 IDEMPOTENCY_CONFLICT` (JSON) |
+| 같은 세션에서 다른 답변을 만드는 중 | `409 STREAM_IN_PROGRESS` (JSON, 키가 달라도) |
+
+**연결 끊김·실패**
+- 연결을 끊으면 서버도 답변 생성을 멈추고 미완성 답변은 저장하지 않음. 질문은 남음 (끊은 뒤 `GET …/messages`로 이력을 다시 받으면 질문이 보임)
+- 스트림 중 실패는 `error` 이벤트로 끝남 (`done` 없음): `RAG_TIMEOUT`(LLM 시간 초과), `RAG_UPSTREAM_ERROR`(LLM 호출 실패), `INTERNAL_ERROR`(그 밖). `message`는 화면에 그대로 보여 줄 수 있는 문장
+- 하루 LLM 상한은 실제로 답변을 만들 때만 셈 (저장된 답변 다시 보내기는 세지 않음)
+
+## 2-1. 배포 경로 SSE 검증 (R2)
+더미 `POST /api/health/stream`은 만들지 않았다. 채팅 API 뼈대로 검증한다. 실제 답변은 10~20초라 긴 스트림 확인에는 뼈대를 쓴다.
 
 **순서**
-1. `POST /api/sessions`로 세션을 만든다 (본문 `{}`이어도 됨)
+0. 서버 환경 변수 `CHAT_SKELETON_ENABLED=true`로 띄운다 (검증이 끝나면 끔. 켜져 있는 동안 `/chat`은 실제 답변 대신 뼈대로 답함)
+1. `POST /api/sessions`로 세션을 만든다 (프로필 8항목 필요, 3절)
 2. 그 `id`로 `POST /api/sessions/{id}/chat` 호출
 
 ```bash
@@ -45,7 +66,7 @@ curl -N -X POST <주소>/api/sessions/<id>/chat \
 - 15초 대기 → `token` 90개 1초 간격 (`"검증용 답변 1/90. "` …, 10번째마다 끝에 `\n`) → `policies` → `done`
 - `:ping`은 15초마다 (token을 보내는 동안에도)
 - `policies`: 검증용 카드 하나 `{"id":"SKELETON-1","title":"SSE 검증용 정책","status":"ALWAYS_OPEN","regionLabel":"전국",…}`
-- `done`: `{"messageId":"skeleton-<clientMessageId>"}`. 같은 `clientMessageId`로 다시 보내면 같은 id
+- `done`: `{"messageId":"skeleton-<clientMessageId>"}`. 같은 `clientMessageId`로 다시 보내면 같은 id. 뼈대는 저장하지 않음
 - 세션·입력 오류는 스트림 전에 JSON (404, 400). `content`는 1~1000자
 
 백엔드 로컬 확인 결과: 첫 token 15.00초, 간격 중앙값·최대 1.00초, ping 최대 간격 15.00초, `policies` → `done`으로 끝남. 연결을 중간에 끊으면 서버가 바로 멈춤
@@ -63,5 +84,4 @@ curl -N -X POST <주소>/api/sessions/<id>/chat \
 
 ## 4. 다음 (백엔드)
 - 서버 주소(R1): 인프라 담당자가 띄우면 이 문서에 추가 (배포 방법은 [deploy.md](deploy.md))
-- 채팅 본구현: 실제 RAG 답변 스트리밍, `policies`를 첫 `token` 직전에 (B9), `clientMessageId` 멱등 처리(§5.3), 연결이 끊기면 생성 취소
 - 공개 API 2: 정책 검색·상세, 요약·추천, 스크랩
