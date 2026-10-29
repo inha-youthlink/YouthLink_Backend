@@ -18,6 +18,8 @@ SKELETON_POLICY = PolicySummary(
     organization="YouthLink",
     source_url=None,
 )
+# 프론트가 아직 v0.3 카드 형식(category·region 필수)으로 검사해서 R2 확인 동안만 함께 보냄. 4c에서 뼈대와 함께 삭제
+LEGACY_CARD_FIELDS = {"category": "WELFARE", "region": "NATIONWIDE"}
 # token 안의 줄바꿈이 JSON 문자열로 잘 넘어가는지도 보려고 주기적으로 넣음
 NEWLINE_EVERY = 10
 
@@ -33,6 +35,7 @@ async def skeleton_events(client_message_id: UUID, settings: Settings) -> AsyncG
         if index < total:
             await asyncio.sleep(settings.chat_skeleton_token_interval)
 
-    yield sse_event("policies", [SKELETON_POLICY.model_dump(by_alias=True, mode="json")])
+    card = SKELETON_POLICY.model_dump(by_alias=True, mode="json") | LEGACY_CARD_FIELDS
+    yield sse_event("policies", [card])
     # 같은 clientMessageId로 다시 보내면 같은 id가 나가 프론트의 중복 방지(id 기준)가 실제 재전송과 같게 동작함
     yield sse_event("done", {"messageId": f"skeleton-{client_message_id}"})
