@@ -1,6 +1,6 @@
 # YouthLink 공개 API 계약
 
-- 상태: **v0.5 잠정 — 프론트 확인 전.** 1~3절의 백엔드 제안대로 4절을 정리하고 이 기준으로 먼저 구현함. 프론트와 협의해 바뀌는 내용이 있으면 4절과 구현에 추가로 반영함
+- 상태: **v0.6 잠정 — 프론트 확인 전.** 1~3절의 백엔드 제안대로 4절을 정리하고 이 기준으로 먼저 구현함. 프론트와 협의해 바뀌는 내용이 있으면 4절과 구현에 추가로 반영함
 - 기준: 프론트 초안 `YouthLink_Front/spec/api-contract.md` **v0.3** (이 문서의 `R1`, `§2.3` 같은 번호는 프론트 초안의 번호)
 - 범위: 브라우저(React) ↔ 백엔드(FastAPI) 공개 API `/api/*`. 평가 서버용 `/internal/*`은 다루지 않는다
 
@@ -159,8 +159,21 @@
 
 **프로필 `Profile`** (v0.3 §2.3, 8항목 모두 필수)
 - `region`만 위 5자리 코드로 바뀌고, 나머지 필드·enum 값은 v0.3 그대로
-- 검증: 나이 15~39, 연소득 0 이상(만 원, 백엔드가 원으로 바꿔 정책 소득 기준과 비교), enum 밖 값은 `400 VALIDATION_FAILED` + 필드별 `details`
-- enum ↔ 정책 데이터 공통코드 매핑표(H2)는 4c에서 이 절에 붙임. 구현 4c
+- 검증: 나이 15~39, 연소득 0~1,000,000(만 원, 백엔드가 원으로 바꿔 정책 소득 기준과 비교), enum 밖 값·모르는 지역 코드는 `400 VALIDATION_FAILED` + 필드별 `details`
+- 응답의 `profile`도 같은 형식. `region`은 저장한 5자리 코드 (과도기 시도 enum은 바꾼 코드, 4.6). 구현됨 (4c-1)
+
+**enum ↔ 정책 데이터 공통코드** (H2)
+| 필드 | 계약 값 → 공통코드 |
+|---|---|
+| `maritalStatus` | `SINGLE` 0055002 미혼, `MARRIED` 0055001 기혼 |
+| `education` | `BELOW_HIGH_SCHOOL` 0049001, `HIGH_SCHOOL_ENROLLED` 0049002, `HIGH_SCHOOL_GRADUATED` 0049004, `COLLEGE_ENROLLED` 0049005, `COLLEGE_EXPECTED` 0049006, `COLLEGE_GRADUATED` 0049007, `GRADUATE_SCHOOL` 0049008, `OTHER` 0049009 기타 |
+| `major` | `HUMANITIES` 0011001 ~ `AGRICULTURE` 0011007 (v0.3 순서대로), `OTHER` 0011008 기타, `NONE` 0011009 제한없음 |
+| `employmentStatus` | `EMPLOYED` 0013001 ~ `FARMER` 0013008 (v0.3 순서대로), `OTHER` 0013009 기타 |
+| `specialField` | `SME` 0014001 ~ `LOCAL_TALENT` 0014008 (v0.3 순서대로), `NONE` 0014010 제한없음 |
+
+- **`NONE`(해당 없음)**: 사용자가 그 대상이 아니라고 답한 것이라, 특정 전공·대상 전용 정책(예: "중소기업 재직자만")은 추천에서 빠짐
+- **`OTHER`(기타)**: 정해진 분류에 맞지 않는다는 뜻이라 그 항목으로는 거르지 않음 (특정 값 전용 정책도 남김). 답변 생성에는 "기타"로 전달
+- 정책 데이터의 학력 "고졸 예정"(0049003)은 계약 enum에 없음
 
 ### 4.3 공통 타입 (v0.3 §3)
 ```ts
@@ -177,7 +190,7 @@ type ApplicationStatus = 'OPEN' | 'ALWAYS_OPEN' | 'UPCOMING' | 'CLOSED' | 'UNKNO
 interface PolicySummary {
   id: string
   title: string
-  category: Category
+  category: Category | null // 정책 데이터 대분류. 여러 개면 첫 번째, 대분류가 없는 정책(1건)은 null
   regionLabel: string      // "서울특별시 강남구", "경기도 5곳", "서울특별시 외 14개 시도", "전국" (B6)
   applyStart: ISODate | null
   applyEnd: ISODate | null
@@ -195,12 +208,12 @@ interface PolicyDetail extends PolicySummary {
 }
 ```
 - `Message`, `Scrap`은 v0.3 그대로. `Message.policies`의 순서는 답변 본문의 소개 순서와 같음 (B8, 카드 번호 배지 = 배열 위치 + 1)
-- 구현: `ChatSession`·카드 4c (지금은 `category` 없음, 세션 `profile`은 임시 DB 코드 형식), `PolicyDetail` API 2
+- 구현: `ChatSession`·카드 됨 (4c-1), `PolicyDetail` API 2
 
 ### 4.4 REST 엔드포인트 (v0.3 §4)
 | 엔드포인트 | v0.3과 다른 점 | 구현 |
 |---|---|---|
-| `POST /api/sessions` | 요청에 `category` 없음 (B3) | 됨 (프로필 형식은 4c) |
+| `POST /api/sessions` | 요청에 `category` 없음 (B3) | 됨 |
 | `GET /api/sessions`, `GET /api/sessions/{id}`, `GET /api/sessions/{id}/messages` | 없음. 목록은 만든 시각 내림차순 | 됨 |
 | `POST /api/sessions/{id}/summary` | 없음 | API 2 |
 | `GET /api/sessions/{id}/recommendations` | 기준이 세션 카테고리가 아니라 **대화에서 나온 분야**. 대화 전이면 프로필 기준으로 신청 가능한 정책 (B3) | API 2 |
@@ -218,15 +231,16 @@ interface PolicyDetail extends PolicySummary {
 - 연결 유지 (R4): 연결 타임아웃 120초 이상, 15초 `:ping`, `Cache-Control: no-cache`, `X-Accel-Buffering: no` (구현됨)
 - SSE 검증 (R2, §5.4): 채팅 API 뼈대로 함. 더미 `POST /api/health/stream`은 만들지 않음. 뼈대는 4c 뒤에도 설정으로 켤 수 있게 남기고, 배포 경로 검증이 끝나면 지움
 
-### 4.6 과도기 호환 (4c에서 확정, 프론트가 바뀌면 지움)
+### 4.6 과도기 호환 (구현됨, 프론트가 바뀌면 지움)
 프론트 코드가 아직 v0.3 형식이라 첫 실연동이 깨지지 않게 백엔드가 잠시 함께 받거나 보냄
-- 프로필 `region`: 5자리 코드와 함께 v0.3 시도 enum(`SEOUL` 등)도 받아 "○○ 전체" 코드로 바꿈
+- 프로필 `region`: 5자리 코드와 함께 v0.3 시도 enum(`SEOUL` 등)도 받아 "○○ 전체" 코드로 바꿈 (`SEOUL` → `"11000"`). 광주·전남은 정책 데이터에서 통합특별시 하나라 `GWANGJU`·`JEONNAM` 모두 `"12000"`. 응답의 `profile.region`은 바꾼 5자리 코드
 - 세션 생성의 `category`: 보내도 무시
-- 카드: `regionLabel`과 함께 v0.3 `region`도 보냄 (지금 뼈대 카드는 `category`·`region`을 임시 값으로 보냄)
+- 카드: `regionLabel`과 함께 v0.3 `region`도 보냄. 시도 하나("서울특별시 강남구", "경기도 5곳")면 그 시도 enum, 그 밖("전국", "○○ 외 N개 시도")은 `NATIONWIDE`. 통합특별시는 `JEONNAM`
 
 ## 변경 이력
 - v0.1 (2026-10-25): 프론트 초안 v0.3에 대한 백엔드 검토안. 수락·제안·합의 필요 정리
 - v0.2 (2026-10-25): 백엔드 구현(#35 조건 원칙, #36 시군구 필터)에 맞춤. B4 되묻기 문구 변경, 같은 시도의 다른 시군구도 되묻기, 알 수 없는 지명은 답변에서 안내. H3 구가 있는 시의 코드 처리, H4 버튼 문구
-- v0.5 (2026-10-29): 잠정본. 4절 계약 본문을 1~3절 제안 기준으로 채움, H1 카테고리 5개 결정, 과도기 호환(4.6)
 - v0.3 (2026-10-25): 프론트 초안 대조로 빠진 것 보강. R2 더미 대신 뼈대(세션 먼저 생성), 질문 길이 1~1000자, R1 배포 대안 시 CORS·HTTPS, Q4는 PDF 때, B1 정책 검색 지역 필터, B3 첫 질문 전 제목과 프론트 영향, 나중에 답할 것 목록
 - v0.4 (2026-10-26): §1.4 표에 없는 오류 코드(413, 403, 404·405)와 하루 LLM 상한 429 추가
+- v0.5 (2026-10-29): 잠정본. 4절 계약 본문을 1~3절 제안 기준으로 채움, H1 카테고리 5개 결정, 과도기 호환(4.6)
+- v0.6 (2026-10-29): H2 매핑표와 `NONE`·`OTHER` 처리, 카드 `category` null 허용, 연소득 상한, 과도기 호환 세부 (공개 API 1-2 첫 단계 구현)
