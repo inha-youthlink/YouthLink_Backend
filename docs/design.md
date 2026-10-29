@@ -270,7 +270,8 @@ POST /internal/pipeline   PipelineInput → PipelineOutput (저장 없음)
 - 됨: 공통 규칙(`X-Client-Id` UUID v4, 오류 형식, 422 → `400 VALIDATION_FAILED`, 일시 `+09:00`), 세션 4개, 채팅 SSE 뼈대(RAG 없이 계약 §5.4 조건, 세션·입력 오류는 시작 전에 JSON)
 - 프로필·카드 (계약 v0.6 4절): 세션 프로필은 계약 enum 8항목 필수, `services/profile_codes.py`에서 DB 코드 `Profile`로 바꿔 저장하고 응답은 다시 계약 형식으로. 모르는 지역 코드는 세션을 만들 때 400. 세션 `category` 없음(B3). 카드에 `category`(H1, 정책 대분류 첫 번째)
 - 과도기 호환 (계약 4.6, 프론트가 바뀌면 지움): 프로필 `region`의 시도 enum, 세션 생성의 `category` 무시, 카드의 v0.3 `region`
-- 남음(1-2): 채팅에 RAG 연결(스트리밍), `clientMessageId` 멱등 처리(ETL 009), 연결 끊김 시 생성 취소
+- 파이프라인 스트리밍 (1-2): `stream_pipeline()`이 카드 → 본문 조각 → `PipelineOutput` 순서로 내보냄 (B9). 답변 첫 줄 `[소개: …]`를 받는 즉시 카드를 정하고, 40자가 넘도록 줄바꿈이 없으면 카드 줄이 아니라고 봄. `/internal`의 `run_pipeline()`은 같은 스트림을 모아 한 번에 돌려줘 결과·trace가 같음. trace `latency_ms.first_token` 추가 (질문을 받고 첫 본문 조각까지)
+- 남음(1-2): `/chat`에 스트림 연결(뼈대는 설정으로 남김), `clientMessageId` 멱등 처리(ETL 009), 연결 끊김 시 생성 취소, 스트림 중 `error` 이벤트
 
 ---
 

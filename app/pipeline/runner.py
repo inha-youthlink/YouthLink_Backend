@@ -1,5 +1,6 @@
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
 from time import perf_counter
 
 from app.core.dependencies import PipelineDeps
@@ -9,10 +10,15 @@ from app.pipeline.conditions import build_conditions, load_code_names, load_regi
 from app.pipeline.context import PipelineContext
 from app.pipeline.current_policy import update_current_policies
 from app.pipeline.evidence import Evidence
-from app.pipeline.generator import generate
+from app.pipeline.generator import (
+    AnswerDelta,
+    CardsDecided,
+    GenerationResult,
+    generate_stream,
+)
 from app.pipeline.handlers import clarify, detail, search, short
 from app.pipeline.router import Handler, choose_route
-from app.schemas.pipeline import PipelineInput, PipelineOutput
+from app.schemas.pipeline import PipelineInput, PipelineOutput, PolicyItem
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +30,29 @@ HANDLERS: dict[Handler, Callable[[PipelineContext], Awaitable[Evidence]]] = {
 }
 
 
+# 스트림 이벤트: 카드(한 번) → 본문 조각들 → PipelineOutput. 카드는 항상 첫 본문 조각 바로 앞에 나감 (계약 B9)
+@dataclass(frozen=True)
+class PolicyCards:
+    policies: list[PolicyItem]
+
+
+@dataclass(frozen=True)
+class AnswerToken:
+    text: str
+
+
+type PipelineEvent = PolicyCards | AnswerToken | PipelineOutput
+
+
+# /internal은 스트림을 끝까지 모아 한 번에 돌려줌. 채팅과 같은 코드라 결과와 trace가 같음
 async def run_pipeline(inp: PipelineInput, deps: PipelineDeps) -> PipelineOutput:
+    async for event in stream_pipeline(inp, deps):
+        if isinstance(event, PipelineOutput):
+            return event
+    raise RuntimeError("파이프라인 스트림이 결과 없이 끝남")
+
+
+async def stream_pipeline(inp: PipelineInput, deps: PipelineDeps) -> AsyncIterator[PipelineEvent]:
     started = perf_counter()
     ctx = PipelineContext(input=inp, deps=deps, query=inp.question)
 
@@ -53,13 +81,27 @@ async def run_pipeline(inp: PipelineInput, deps: PipelineDeps) -> PipelineOutput
     ctx.trace.setdefault("filtered_policy_nos", None)
 
     generate_started = perf_counter()
-    result = await generate(ctx)
+    evidence = ctx.evidence
+    policies: list[PolicyItem] = []
+    result: GenerationResult | None = None
+    async for event in generate_stream(ctx):
+        if isinstance(event, CardsDecided):
+            if event.numbers is None:
+                logger.warning("답변 첫 줄 카드 형식이 없어 후보 전체를 카드로 표시함")
+            policies = build_cards(
+                evidence.candidates, evidence.policies, event.numbers, ctx.today, evidence.region_labels
+            )
+            yield PolicyCards(policies)
+        elif isinstance(event, AnswerDelta):
+            # 질문을 받고 사용자가 첫 글자를 보기까지의 시간 (응답 속도 확인용)
+            latency.setdefault("first_token", _elapsed_ms(started))
+            yield AnswerToken(event.text)
+        else:
+            result = event
+    if result is None:
+        raise RuntimeError("답변 스트림이 결과 없이 끝남")
     latency["generate"] = _elapsed_ms(generate_started)
 
-    evidence = ctx.evidence
-    if result.card_numbers is None:
-        logger.warning("답변 첫 줄 카드 형식이 없어 후보 전체를 카드로 표시함")
-    policies = build_cards(evidence.candidates, evidence.policies, result.card_numbers, ctx.today, evidence.region_labels)
     ctx.trace.update({
         "contexts": result.contexts,
         "cards": {
@@ -75,7 +117,7 @@ async def run_pipeline(inp: PipelineInput, deps: PipelineDeps) -> PipelineOutput
         "tokens": {"prompt": result.prompt_tokens, "completion": result.completion_tokens},
     })
     latency["total"] = _elapsed_ms(started)
-    return PipelineOutput(
+    yield PipelineOutput(
         answer=result.answer, policies=policies, trace=ctx.trace, current_policies=ctx.current_policies
     )
 

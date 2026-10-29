@@ -2,11 +2,26 @@ import uuid
 
 from app.core.config import Settings
 from app.core.dependencies import PipelineDeps
-from app.llm.client import ChatResult, ParsedResult
-from app.pipeline.runner import run_pipeline
+from app.llm.client import ChatUsage, ParsedResult
+from app.pipeline.runner import AnswerToken, PolicyCards, run_pipeline, stream_pipeline
 from app.repositories.policy_repository import PolicyRecord, RegionRow
-from app.schemas.analysis import Category, Intent, JobStatus, QueryAnalysis, SchoolLevel, StatusFilter, SubQuery
-from app.schemas.pipeline import Chunk, ConversationTurn, PipelineInput, PolicyRef, Profile
+from app.schemas.analysis import (
+    Category,
+    Intent,
+    JobStatus,
+    QueryAnalysis,
+    SchoolLevel,
+    StatusFilter,
+    SubQuery,
+)
+from app.schemas.pipeline import (
+    Chunk,
+    ConversationTurn,
+    PipelineInput,
+    PipelineOutput,
+    PolicyRef,
+    Profile,
+)
 
 RENT = PolicyRef(policy_no="P-RENT", policy_name="청년 월세 지원")
 MOVE = PolicyRef(policy_no="P-MOVE", policy_name="청년 이사비 지원")
@@ -29,9 +44,11 @@ class FakeLLM:
     async def analyze(self, messages, text_format):
         return ParsedResult(QueryAnalysis(sub_queries=[self._sub], is_new_topic=False), 50, 10)
 
-    async def chat(self, messages):
+    async def chat_stream(self, messages):
         self.chat_calls += 1
-        return ChatResult(text=self._answer, prompt_tokens=100, completion_tokens=20)
+        for start in range(0, len(self._answer), 3):
+            yield self._answer[start:start + 3]
+        yield ChatUsage(prompt_tokens=100, completion_tokens=20)
 
 
 class FakeRetriever:
@@ -188,3 +205,24 @@ async def test_question_region_mismatch_on_targeted_policy_answers():
     assert llm.chat_calls == 1
     assert output.trace["handler"] == "detail"
     assert [policy.policy_no for policy in output.policies] == ["P-MOVE"]
+
+
+# 채팅 SSE가 그대로 보낼 순서: 카드 → 본문 조각들 → 결과. 조각을 이으면 /internal 답변과 같음
+async def test_stream_sends_cards_then_tokens_then_output():
+    events = [
+        event async for event in stream_pipeline(
+            PipelineInput(question="주거 지원 알려줘"),
+            _deps(FakeLLM(Intent.POLICY_LIST, [], "[소개: 2]\n1. 청년 이사비 지원")),
+        )
+    ]
+
+    assert isinstance(events[0], PolicyCards)
+    assert [policy.policy_no for policy in events[0].policies] == ["P-MOVE"]
+    tokens = events[1:-1]
+    assert tokens and all(isinstance(event, AnswerToken) for event in tokens)
+    output = events[-1]
+    assert isinstance(output, PipelineOutput)
+    assert "".join(token.text for token in tokens) == output.answer == "1. 청년 이사비 지원"
+    assert output.policies == events[0].policies
+    latency = output.trace["latency_ms"]
+    assert latency["analyze"] <= latency["first_token"] <= latency["total"]
