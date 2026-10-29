@@ -6,6 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app.repositories.chat_repository import ChatRepository
+from app.schemas.analysis import Category
 from app.schemas.pipeline import PolicyItem, PolicyRef, Profile
 from app.schemas.policy_info import CLOSED_CODE, ApplicationStatus
 from tests.conftest import TEST_POLICY_NOS
@@ -99,13 +100,14 @@ async def test_policy_refs_restore_status_and_org(chat_repository, session_facto
     update = text("""
         UPDATE policy
         SET application_period_type_code = :code, application_start_date = :start,
-            application_end_date = :end, application_url = :url, supervising_org_name = :org
+            application_end_date = :end, application_url = :url, supervising_org_name = :org,
+            large_categories = :categories
         WHERE policy_no = :no
     """)
     async with session_factory() as session, session.begin():
         await session.execute(update, {
             "code": CLOSED_CODE, "start": date(2026, 1, 1), "end": date(2099, 12, 31),
-            "url": "www.example.go.kr", "org": "테스트 기관", "no": policy_no,
+            "url": "www.example.go.kr", "org": "테스트 기관", "categories": ["복지문화"], "no": policy_no,
         })
     try:
         room_id = await chat_repository.create_room(USER_ID, Profile())
@@ -118,9 +120,12 @@ async def test_policy_refs_restore_status_and_org(chat_repository, session_facto
         assert card.application_end_date == date(2099, 12, 31)
         assert card.supervising_org_name == "테스트 기관"
         assert card.application_url == "https://www.example.go.kr"
+        assert card.category == Category.WELFARE_CULTURE
     finally:
         async with session_factory() as session, session.begin():
-            await session.execute(update, {"code": None, "start": None, "end": None, "url": None, "org": None, "no": policy_no})
+            await session.execute(update, {
+                "code": None, "start": None, "end": None, "url": None, "org": None, "categories": [], "no": policy_no,
+            })
 
 
 async def test_save_turn_without_policies(chat_repository):
