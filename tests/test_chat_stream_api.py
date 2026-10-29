@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app.api.sessions import get_chat_service
 from app.core.config import get_settings
 from app.main import app
-from tests.test_sessions_api import (
+from tests.conftest import (
     CLIENT_ID,
     HEADERS,
     OTHER_CLIENT_ID,
@@ -25,6 +25,7 @@ def client():
     settings = get_settings().model_copy(
         update={
             "sse_ping_interval": 0.05,
+            "chat_skeleton_enabled": True,
             "chat_skeleton_first_delay": 0.12,
             "chat_skeleton_tokens": 12,
             "chat_skeleton_token_interval": 0.0,

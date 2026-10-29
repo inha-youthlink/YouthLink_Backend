@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     # Streaming
     # 프록시가 조용한 연결을 끊지 않게 보내는 간격 (계약 R4)
     sse_ping_interval: float = Field(default=15.0, gt=0)
+    # 켜면 /chat이 RAG 대신 뼈대(고정 문장, 저장 안 함)로 답함. 실제 답변은 10~20초라 배포 경로의 긴 스트림 확인(R2)에 씀
+    chat_skeleton_enabled: bool = False
     # 채팅 뼈대의 대기·길이 (계약 §5.4 검증 조건). 연결을 오래 잡아 검증이 끝나면 줄임
     chat_skeleton_first_delay: float = Field(default=15.0, ge=0)
     chat_skeleton_tokens: int = Field(default=90, ge=1)

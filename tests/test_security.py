@@ -7,7 +7,7 @@ from app.api.sessions import get_chat_service
 from app.core.config import get_settings
 from app.core.middleware import SECURITY_HEADERS, BodySizeLimitMiddleware
 from app.main import app
-from tests.test_sessions_api import HEADERS, PROFILE, FakeChatRepository, make_service
+from tests.conftest import HEADERS, PROFILE, FakeChatRepository, make_service
 
 ORIGIN_SECRET = "o" * 43
 
@@ -34,7 +34,7 @@ def test_security_headers(client, path):
 
 
 def test_security_headers_keep_sse_headers(client):
-    _use_settings(chat_skeleton_first_delay=0, chat_skeleton_tokens=1)
+    _use_settings(chat_skeleton_enabled=True, chat_skeleton_first_delay=0, chat_skeleton_tokens=1)
     session_id = client.post("/api/sessions", json={"profile": PROFILE}, headers=HEADERS).json()["id"]
 
     response = client.post(
