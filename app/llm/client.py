@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
 from openai import AsyncOpenAI, OpenAIError
@@ -89,7 +89,7 @@ class LLMClient:
 
     # 글자 조각(str)을 받는 대로 내보내고 마지막에 ChatUsage를 내보냄
     # 소비하는 쪽이 멈추면(연결 끊김) async with가 스트림을 닫아 생성도 멈춤
-    async def chat_stream(self, messages: list[dict[str, str]]) -> AsyncIterator[str | ChatUsage]:
+    async def chat_stream(self, messages: list[dict[str, str]]) -> AsyncGenerator[str | ChatUsage, None]:
         stream = await self._client.responses.create(
             model=self.chat_model,
             input=messages,

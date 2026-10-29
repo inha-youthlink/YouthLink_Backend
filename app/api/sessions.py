@@ -11,10 +11,12 @@ from app.core.dependencies import (
     get_chat_repository,
     get_pipeline_deps,
     get_rate_limits,
+    get_session_locks,
     limit_chat_requests,
 )
 from app.core.errors import SessionNotFoundError
 from app.core.rate_limit import RateLimits
+from app.core.session_lock import SessionLocks
 from app.core.sse import SSE_HEADERS, with_pings
 from app.repositories.chat_repository import ChatRepository
 from app.schemas.public import ErrorResponse
@@ -42,8 +44,9 @@ _NOT_FOUND = {status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}}
 def get_chat_service(
     chat_repository: ChatRepository = Depends(get_chat_repository),
     pipeline_deps: PipelineDeps = Depends(get_pipeline_deps),
+    session_locks: SessionLocks = Depends(get_session_locks),
 ) -> ChatService:
-    return ChatService(chat_repository, pipeline_deps)
+    return ChatService(chat_repository, pipeline_deps, session_locks)
 
 
 # UUID가 아닌 id도 계약상 "없는 세션"이라 검증 오류(400) 대신 404로 응답함
@@ -84,6 +87,7 @@ async def list_messages(session_id: SessionId, client_id: ClientId, service: Ser
     response_class=StreamingResponse,
     responses={
         status.HTTP_200_OK: {"content": {"text/event-stream": {}}},
+        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
         status.HTTP_429_TOO_MANY_REQUESTS: {"model": ErrorResponse},
         **_NOT_FOUND,
     },
@@ -97,11 +101,12 @@ async def chat(
     settings: Annotated[Settings, Depends(get_settings)],
     limits: Annotated[RateLimits, Depends(get_rate_limits)],
 ) -> StreamingResponse:
-    await service.get_session(session_id, client_id)
-    # 뼈대는 LLM을 부르지 않지만 본구현과 같은 자리에서 미리 셈
-    limits.use_llm()
+    if settings.chat_skeleton_enabled:
+        # 배포 경로 SSE 확인용. LLM을 부르지 않고 저장하지 않아 하루 상한에 세지 않음
+        await service.get_session(session_id, client_id)
+        events = skeleton_events(request.client_message_id, settings)
+    else:
+        events = await service.start_chat(session_id, client_id, request, limits)
     return StreamingResponse(
-        with_pings(skeleton_events(request.client_message_id, settings), settings.sse_ping_interval),
-        media_type="text/event-stream",
-        headers=SSE_HEADERS,
+        with_pings(events, settings.sse_ping_interval), media_type="text/event-stream", headers=SSE_HEADERS
     )

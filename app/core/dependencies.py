@@ -9,6 +9,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from app.core.config import Settings, get_settings
 from app.core.errors import ForbiddenOriginError, InvalidClientIdError
 from app.core.rate_limit import RateLimitedError, RateLimits
+from app.core.session_lock import SessionLocks
 from app.llm.client import LLMClient
 from app.pipeline.retrieval.base import Retriever
 from app.repositories.chat_repository import ChatRepository
@@ -108,6 +109,12 @@ def verify_origin(
 @lru_cache
 def get_rate_limits() -> RateLimits:
     return RateLimits(get_settings())
+
+
+# 생성 중 표시를 프로세스 전체에서 함께 봐야 해서 하나만 만듦
+@lru_cache
+def get_session_locks() -> SessionLocks:
+    return SessionLocks()
 
 
 # 공개 API 전체에 거는 IP 제한. main.py에서 공개 라우터를 등록할 때 붙임

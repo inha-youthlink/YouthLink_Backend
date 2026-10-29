@@ -48,9 +48,9 @@ WHERE r.user_id = :user_id
 ORDER BY r.created_at DESC
 """)
 
-# 질문과 답변은 한 트랜잭션에 저장되어 created_at이 같으므로 message_id로 순서를 보장함
+# 같은 시각에 저장된 메시지도 있어 message_id로 순서를 보장함
 _LIST_MESSAGES_SQL = text("""
-SELECT message_id, role, content, created_at
+SELECT message_id, role, content, client_message_id, created_at
 FROM chat_message
 WHERE room_id = :room_id
 ORDER BY created_at, message_id
@@ -67,17 +67,33 @@ WHERE r.message_id = ANY(:message_ids)
 ORDER BY r.message_id, r.display_order
 """)
 
-# 최근 메시지를 역순으로 자른 뒤 다시 시간순으로 돌려 오래된 턴부터 반환함
-_LIST_RECENT_MESSAGES_SQL = text("""
-SELECT message_id, role, content
+# 답변이 가리키는 질문으로 짝을 지어, 답변 없이 남은 질문(연결 끊김, 생성 실패)은 대화 기록에서 빠짐
+# 최근 답변을 역순으로 자른 뒤 다시 시간순으로 돌려 오래된 턴부터 반환함
+_LIST_RECENT_TURNS_SQL = text("""
+SELECT question, answer_id, answer
 FROM (
-    SELECT message_id, role, content, created_at
-    FROM chat_message
-    WHERE room_id = :room_id
-    ORDER BY created_at DESC, message_id DESC
+    SELECT q.content AS question, a.message_id AS answer_id, a.content AS answer
+    FROM chat_message a
+    JOIN chat_message q ON q.message_id = a.reply_to_message_id
+    WHERE a.room_id = :room_id AND a.role = 'assistant'
+    ORDER BY a.message_id DESC
     LIMIT :limit
 ) recent
-ORDER BY created_at, message_id
+ORDER BY answer_id
+""")
+
+# 재시도한 질문과 그 답변(있으면). 답변 다시 생성을 막지 않는 스키마라 가장 최근 답변을 씀
+_FIND_QUESTION_SQL = text("""
+SELECT q.message_id, q.content, a.message_id AS answer_id, a.content AS answer
+FROM chat_message q
+LEFT JOIN LATERAL (
+    SELECT message_id, content
+    FROM chat_message
+    WHERE reply_to_message_id = q.message_id AND role = 'assistant'
+    ORDER BY message_id DESC
+    LIMIT 1
+) a ON TRUE
+WHERE q.room_id = :room_id AND q.client_message_id = :client_message_id AND q.role = 'user'
 """)
 
 _LIST_CURRENT_POLICIES_SQL = text("""
@@ -89,8 +105,8 @@ ORDER BY c.display_order
 """)
 
 _INSERT_MESSAGE_SQL = text("""
-INSERT INTO chat_message (room_id, role, content, metadata)
-VALUES (:room_id, :role, :content, :metadata)
+INSERT INTO chat_message (room_id, role, content, metadata, client_message_id, reply_to_message_id)
+VALUES (:room_id, :role, :content, :metadata, :client_message_id, :reply_to_message_id)
 RETURNING message_id
 """).bindparams(bindparam("metadata", type_=JSONB))
 
@@ -109,7 +125,7 @@ INSERT INTO chat_current_policy (room_id, policy_no, display_order)
 VALUES (:room_id, :policy_no, :display_order)
 """)
 
-# 제목은 첫 턴에만 정하고, 이후에는 바뀌지 않아 목록에서 같은 채팅방을 찾기 쉬움
+# 제목은 첫 질문으로만 정하고, 이후에는 바뀌지 않아 목록에서 같은 채팅방을 찾기 쉬움
 _TOUCH_ROOM_SQL = text("""
 UPDATE chat_room
 SET updated_at = NOW(),
@@ -122,10 +138,19 @@ WHERE room_id = :room_id
 class RoomRecord:
     room_id: UUID
     user_id: str
-    # 첫 질문 전에는 비어 있음 (save_turn에서 채움)
+    # 첫 질문 전에는 비어 있음 (save_question에서 채움)
     title: str | None
     created_at: datetime
     profile: Profile
+
+
+@dataclass(frozen=True)
+class QuestionRecord:
+    message_id: int
+    content: str
+    # 답변까지 저장됐으면 그 답변
+    answer_id: int | None
+    answer: str | None
 
 
 class ChatRepository:
@@ -178,55 +203,61 @@ class ChatRepository:
             return []
 
         async with self._session_factory() as session:
-            result = await session.execute(
-                _LIST_RECENT_MESSAGES_SQL, {"room_id": room_id, "limit": turns * 2}
-            )
-            messages = result.mappings().all()
+            result = await session.execute(_LIST_RECENT_TURNS_SQL, {"room_id": room_id, "limit": turns})
+            rows = result.mappings().all()
 
-        # save_turn이 질문·답변을 한 트랜잭션에 넣어 방 안에서는 질문 다음에 항상 답변이 옴
-        pairs = [
-            (question, answer)
-            for question, answer in zip(messages[::2], messages[1::2])
-            if question["role"] == "user" and answer["role"] == "assistant"
-        ]
-        refs = await self.list_policy_refs([answer["message_id"] for _, answer in pairs])
+        refs = await self.list_policy_refs([row["answer_id"] for row in rows])
         return [
             ConversationTurn(
-                question=question["content"],
-                answer=answer["content"],
+                question=row["question"],
+                answer=row["answer"],
                 policies=[
                     PolicyRef(policy_no=policy.policy_no, policy_name=policy.policy_name)
-                    for policy in refs.get(answer["message_id"], [])
+                    for policy in refs.get(row["answer_id"], [])
                 ],
             )
-            for question, answer in pairs
+            for row in rows
         ]
+
+    async def find_question(self, room_id: UUID, client_message_id: UUID) -> QuestionRecord | None:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                _FIND_QUESTION_SQL, {"room_id": room_id, "client_message_id": client_message_id}
+            )
+            row = result.mappings().one_or_none()
+        return None if row is None else QuestionRecord(**row)
 
     async def list_current_policies(self, room_id: UUID) -> list[PolicyRef]:
         async with self._session_factory() as session:
             result = await session.execute(_LIST_CURRENT_POLICIES_SQL, {"room_id": room_id})
             return [PolicyRef.model_validate(row) for row in result.mappings()]
 
-    # 답변 없는 질문이나 정책 없는 답변이 남지 않도록 한 턴 전체를 한 트랜잭션으로 저장함
-    async def save_turn(
+    # 연결이 끊기거나 생성이 실패해도 질문은 남도록 답변 생성 전에 따로 저장함 (계약 Q3)
+    async def save_question(self, room_id: UUID, client_message_id: UUID, question: str, room_title: str) -> int:
+        async with self._session_factory() as session, session.begin():
+            result = await session.execute(_INSERT_MESSAGE_SQL, {
+                "room_id": room_id, "role": "user", "content": question, "metadata": {},
+                "client_message_id": client_message_id, "reply_to_message_id": None,
+            })
+            question_id = result.scalar_one()
+            await session.execute(_TOUCH_ROOM_SQL, {"room_id": room_id, "title": room_title})
+        return question_id
+
+    # 정책 없는 답변이나 답변과 어긋난 현재 정책이 남지 않도록 답변 쪽은 한 트랜잭션으로 저장함
+    async def save_answer(
         self,
         room_id: UUID,
-        question: str,
+        question_id: int,
         answer: str,
         answer_metadata: dict[str, Any],
         policies: list[PolicyItem],
         current_policies: list[PolicyRef],
-        room_title: str,
     ) -> int:
         async with self._session_factory() as session, session.begin():
-            await session.execute(
-                _INSERT_MESSAGE_SQL,
-                {"room_id": room_id, "role": "user", "content": question, "metadata": {}},
-            )
-            result = await session.execute(
-                _INSERT_MESSAGE_SQL,
-                {"room_id": room_id, "role": "assistant", "content": answer, "metadata": answer_metadata},
-            )
+            result = await session.execute(_INSERT_MESSAGE_SQL, {
+                "room_id": room_id, "role": "assistant", "content": answer, "metadata": answer_metadata,
+                "client_message_id": None, "reply_to_message_id": question_id,
+            })
             answer_id = result.scalar_one()
 
             # "두 번째 거"를 카드 순서로 해석하도록 policies 순서를 1부터 저장함
@@ -248,7 +279,8 @@ class ChatRepository:
                     {"room_id": room_id, "policy_no": policy.policy_no, "display_order": order}
                     for order, policy in enumerate(current_policies, start=1)
                 ])
-            await session.execute(_TOUCH_ROOM_SQL, {"room_id": room_id, "title": room_title})
+            # 제목은 질문을 저장할 때 정해져 있어 시각만 바꿈
+            await session.execute(_TOUCH_ROOM_SQL, {"room_id": room_id, "title": None})
         return answer_id
 
 

@@ -11,15 +11,17 @@ from app.core.rate_limit import DailyLimiter, RateLimits, WindowLimiter
 from app.main import app
 from app.schemas.pipeline import PipelineOutput
 from app.schemas.policy_info import KST
-from tests.test_sessions_api import (
+from tests.conftest import (
     HEADERS,
     OTHER_CLIENT_ID,
     PROFILE,
     FakeChatRepository,
+    FakePipeline,
     make_service,
 )
 
 MESSAGE = {"clientMessageId": "5d7f0a3e-2b1c-4e8f-9a6d-3c2b1a0f9e8d", "content": "질문"}
+OTHER_MESSAGE_ID = "8a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
 
 
 class FakeClock:
@@ -104,6 +106,7 @@ def limited():
             "chat_client_rate_limit_per_minute": 0,
             "llm_daily_limit": 0,
             "internal_api_key": None,
+            "chat_skeleton_enabled": True,
             "chat_skeleton_first_delay": 0,
             "chat_skeleton_tokens": 1,
             **values,
@@ -170,15 +173,32 @@ def test_chat_limit_per_client(limited):
     assert (first.status_code, second.status_code, other.status_code) == (200, 429, 200)
 
 
-def test_llm_daily_limit(limited):
-    client = limited(llm_daily_limit=1)
+def test_llm_daily_limit(limited, monkeypatch):
+    monkeypatch.setattr("app.pipeline.runner.stream_pipeline", FakePipeline())
+    client = limited(llm_daily_limit=1, chat_skeleton_enabled=False)
     session_id = _new_session(client)
 
     # 없는 세션처럼 시작 전에 거절된 요청은 세지 않음
     missing = client.post("/api/sessions/00000000-0000-4000-8000-000000000000/chat", json=MESSAGE, headers=HEADERS)
     first = client.post(f"/api/sessions/{session_id}/chat", json=MESSAGE, headers=HEADERS)
-    second = client.post(f"/api/sessions/{session_id}/chat", json=MESSAGE, headers=HEADERS)
+    # 저장된 답변을 다시 보내는 요청은 LLM을 부르지 않아 세지 않음
+    replay = client.post(f"/api/sessions/{session_id}/chat", json=MESSAGE, headers=HEADERS)
+    second = client.post(
+        f"/api/sessions/{session_id}/chat", json={**MESSAGE, "clientMessageId": OTHER_MESSAGE_ID}, headers=HEADERS
+    )
 
-    assert (missing.status_code, first.status_code, second.status_code) == (404, 200, 429)
+    assert (missing.status_code, first.status_code, replay.status_code, second.status_code) == (404, 200, 200, 429)
     assert second.json()["message"] == "오늘 이용량이 많아 채팅을 잠시 멈췄어요. 내일 다시 이용해 주세요."
     assert second.headers["content-type"] == "application/json"
+
+
+# 뼈대는 LLM을 부르지 않아 하루 상한에 세지 않음
+def test_skeleton_does_not_count_llm(limited):
+    client = limited(llm_daily_limit=1)
+    session_id = _new_session(client)
+
+    for message_id in (MESSAGE["clientMessageId"], OTHER_MESSAGE_ID):
+        response = client.post(
+            f"/api/sessions/{session_id}/chat", json={**MESSAGE, "clientMessageId": message_id}, headers=HEADERS
+        )
+        assert response.status_code == 200

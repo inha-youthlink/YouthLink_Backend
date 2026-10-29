@@ -1,33 +1,17 @@
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Literal
+from uuid import UUID
 
-from pydantic import BaseModel, Field
-
-from app.schemas.pipeline import PolicyItem
-
-# chat_room.user_id VARCHAR(100)과 맞춰 DB 오류 대신 요청 검증에서 막음
-UserId = Annotated[str, Field(min_length=1, max_length=100)]
+from pydantic import BaseModel
 
 # 질문은 분석·답변 생성 입력에 그대로 들어가 길이가 곧 토큰·응답 시간이라 상한을 둠
 QUESTION_MAX_CHARS = 1000
 
 
-class SendMessageRequest(BaseModel):
-    user_id: UserId
-    question: str = Field(min_length=1, max_length=QUESTION_MAX_CHARS)
-
-
-# 정책 형식을 /internal/pipeline과 하나로 유지하려고 PolicyItem을 그대로 씀
-class SendMessageResponse(BaseModel):
-    message_id: int
-    answer: str
-    policies: list[PolicyItem]
-
-
-# 응답 모양을 하나로 맞추려고 질문 메시지도 policies를 빈 목록으로 가짐
 class MessageItem(BaseModel):
     message_id: int
     role: Literal["user", "assistant", "system", "tool"]
     content: str
+    # 질문에만 있는 재시도 키 (계약 R6)
+    client_message_id: UUID | None = None
     created_at: datetime
-    policies: list[PolicyItem] = Field(default_factory=list)
