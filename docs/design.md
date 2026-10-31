@@ -24,7 +24,7 @@
 ### 1-1. ETL과의 데이터 계약
 
 **확정** (ETL `db/schema.sql`, `db/migrations/` 기준)
-- **임베딩 모델과 차원**: `text-embedding-3-small`, 1536차원. 질문도 같은 모델로 임베딩 (`policy_chunk.embedding_model`로 확인)
+- **임베딩 모델과 차원**: `bedrock-titan-embed-v2`, 1024차원. 질문도 같은 모델로 임베딩 (`policy_chunk.embedding_model`로 확인)
 - **거리 기준**: 코사인 → pgvector `<=>` 연산자, 점수는 `1 - 거리`
 - **벡터 인덱스**: HNSW (`vector_cosine_ops`), `WHERE embedding IS NOT NULL` 조건부 인덱스 → 검색 쿼리에도 `embedding IS NOT NULL` 조건 필요
 
@@ -219,8 +219,9 @@ YouthLink_Backend/
 
 | 용도 | 모델 | 설정 키 |
 |---|---|---|
-| 임베딩 | `text-embedding-3-small` (ETL과 반드시 동일) | `EMBEDDING_MODEL` |
-| 답변 생성 | `gpt-6-luna` (비용·속도 기준, 품질 부족 시 `gpt-6.1-sol` 검토) | `CHAT_MODEL` |
+| 접속 | Bedrock 게이트웨이 (OpenAI 호환, Responses API·구조화 출력 지원 확인) | `OPENAI_BASE_URL` |
+| 임베딩 | `bedrock-titan-embed-v2`, 1024차원 (ETL과 반드시 동일) | `EMBEDDING_MODEL` |
+| 답변 생성 | `bedrock-gpt-5.6-luna` | `CHAT_MODEL` |
 
 ### 3-4. 구현 포인트
 - `config.py`: `pydantic-settings`로 `.env` → 타입 검증된 설정. `@lru_cache`로 한 번만 로드. 우선순위는 환경 변수 > `.env` > 기본값

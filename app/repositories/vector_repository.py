@@ -4,8 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.schemas.pipeline import Chunk
 
-# ETL policy_chunk.embedding VECTOR(1536)과 같아야 함
-EMBEDDING_DIM = 1536
+# ETL policy_chunk.embedding VECTOR(1024)와 같아야 함
+EMBEDDING_DIM = 1024
 
 # embedding IS NOT NULL: HNSW가 이 조건의 조건부 인덱스라 빠지면 인덱스를 쓰지 못함
 # ORDER BY: score로 정렬하면 인덱스를 쓰지 못해 거리로 정렬함
