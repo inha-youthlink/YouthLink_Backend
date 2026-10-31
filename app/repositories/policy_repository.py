@@ -13,13 +13,33 @@ ANNUAL_INCOME_CODE = "0043002"
 # 정책 소득 상한은 만 원 단위인데 원 단위로 들어간 값이 섞여 있어(예: 43,056,240) 이 이상은 판정하지 않음
 MAX_INCOME_MANWON = 100_000
 
-_GET_BY_IDS_SQL = text("""
-SELECT policy_no, policy_name,
-       application_period_type_code, application_start_date, application_end_date,
-       application_url, reference_url_1, reference_url_2, supervising_org_name, large_categories
-FROM policy
-WHERE policy_no = ANY(:policy_nos)
+_RECORD_COLUMNS = """p.policy_no, p.policy_name,
+       p.application_period_type_code, p.application_start_date, p.application_end_date,
+       p.application_url, p.reference_url_1, p.reference_url_2, p.supervising_org_name, p.large_categories"""
+
+_GET_BY_IDS_SQL = text(f"""
+SELECT {_RECORD_COLUMNS}
+FROM policy p
+WHERE p.policy_no = ANY(:policy_nos)
 """)
+
+# 신청 상태 순서: 진행 중 → 예정 → 상시 → 기간 정보 없음 → 마감. 판단 순서는 application_status()와 같음
+_STATUS_GROUP_SQL = """CASE
+        WHEN p.application_period_type_code = :always_open_code THEN 2
+        WHEN p.application_period_type_code = :closed_code THEN 4
+        WHEN p.application_start_date IS NULL AND p.application_end_date IS NULL THEN 3
+        WHEN p.application_end_date < :today THEN 4
+        WHEN p.application_start_date > :today THEN 1
+        ELSE 0
+    END"""
+
+# 진행 중은 마감 임박, 예정은 시작 임박, 마감은 최근 마감 순. 나머지와 같은 날짜는 최신 정책 먼저 (정책 번호가 등록일로 시작함)
+# 페이지가 바뀌어도 순서가 흔들리지 않게 마지막에 정책 번호로 정함
+_SEARCH_ORDER_SQL = """status_group,
+    CASE WHEN status_group = 0 THEN application_end_date END ASC NULLS LAST,
+    CASE WHEN status_group = 1 THEN application_start_date END ASC,
+    CASE WHEN status_group = 4 THEN application_end_date END DESC NULLS LAST,
+    policy_no DESC"""
 
 _LIST_REGIONS_SQL = text("""
 SELECT region_code, sido_code, sido_name, sigungu_name
@@ -76,6 +96,10 @@ class PolicyFilter:
     annual_income_won: int | None = None
     exclude_closed: bool = False
     exclude_upcoming: bool = False
+    # 정책 검색용. 대분류 이름 중 하나라도 있으면 남김 (옛 분류 이름도 함께 받음)
+    large_categories: tuple[str, ...] = ()
+    # 정책 검색용. 낱말마다 이름·설명·키워드 중 한 곳에 있어야 남김
+    keywords: tuple[str, ...] = ()
 
     def is_empty(self) -> bool:
         return self == PolicyFilter()
@@ -136,6 +160,33 @@ class PolicyRepository:
             result = await session.execute(text(sql), params)
             return list(result.scalars())
 
+    # 전체 개수는 요청한 페이지가 범위를 넘어 비어 있어도 알려야 해서 따로 셈
+    async def search(
+        self, policy_filter: PolicyFilter, today: date, offset: int, limit: int
+    ) -> tuple[list[PolicyRecord], int]:
+        where, params = _filter_where(policy_filter, today)
+        params.update(
+            always_open_code=ALWAYS_OPEN_CODE, closed_code=CLOSED_CODE, today=today, offset=offset, limit=limit
+        )
+        count_sql = text(f"SELECT count(*) FROM policy p WHERE {where}")
+        page_sql = text(f"""
+SELECT * FROM (
+    SELECT {_RECORD_COLUMNS}, {_STATUS_GROUP_SQL} AS status_group
+    FROM policy p
+    WHERE {where}
+) matched
+ORDER BY {_SEARCH_ORDER_SQL}
+OFFSET :offset LIMIT :limit
+""")
+        async with self._session_factory() as session:
+            total = (await session.execute(count_sql, params)).scalar_one()
+            result = await session.execute(page_sql, params)
+            records = [
+                PolicyRecord(**{key: value for key, value in row.items() if key != "status_group"})
+                for row in result.mappings()
+            ]
+        return records, total
+
     async def get_region_labels(self, policy_nos: list[str]) -> dict[str, str]:
         if not policy_nos:
             return {}
@@ -177,8 +228,13 @@ def _region_label(rows: list[Any]) -> str:
     return f"{row['sido_name']} {row['resolved_active_region_count']}곳"
 
 
-# 조건이 있는 것만 붙여 asyncpg가 타입을 알 수 없는 NULL 비교 파라미터를 피함
 def _build_filter_sql(policy_filter: PolicyFilter, today: date) -> tuple[str, dict[str, Any]]:
+    where, params = _filter_where(policy_filter, today)
+    return f"SELECT p.policy_no FROM policy p\nWHERE {where}", params
+
+
+# 조건이 있는 것만 붙여 asyncpg가 타입을 알 수 없는 NULL 비교 파라미터를 피함
+def _filter_where(policy_filter: PolicyFilter, today: date) -> tuple[str, dict[str, Any]]:
     clauses: list[str] = []
     params: dict[str, Any] = {}
 
@@ -241,5 +297,24 @@ def _build_filter_sql(policy_filter: PolicyFilter, today: date) -> tuple[str, di
     if policy_filter.exclude_closed or policy_filter.exclude_upcoming:
         params.update(closed_code=CLOSED_CODE, always_open_code=ALWAYS_OPEN_CODE, today=today)
 
+    if policy_filter.large_categories:
+        clauses.append("p.large_categories && CAST(:large_categories AS TEXT[])")
+        params["large_categories"] = list(policy_filter.large_categories)
+
+    # 키워드 배열은 낱말 단위라 "월세"로 "청년월세"를 찾을 수 있게 이어 붙인 문자열에서 찾음
+    for index, word in enumerate(policy_filter.keywords):
+        param = f"keyword_{index}"
+        clauses.append(f"""(
+    p.policy_name ILIKE :{param} ESCAPE '\\'
+    OR p.description ILIKE :{param} ESCAPE '\\'
+    OR array_to_string(p.keywords, ' ') ILIKE :{param} ESCAPE '\\'
+)""")
+        params[param] = f"%{_escape_like(word)}%"
+
     where = "\nAND ".join(clauses) if clauses else "TRUE"
-    return f"SELECT p.policy_no FROM policy p\nWHERE {where}", params
+    return where, params
+
+
+# 검색어의 %·_가 와일드카드로 읽혀 모든 정책이 걸리지 않게 글자 그대로 찾음
+def _escape_like(word: str) -> str:
+    return word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
