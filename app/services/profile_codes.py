@@ -105,11 +105,11 @@ def to_profile(request: SessionProfileRequest, regions: RegionIndex) -> Profile:
 
 # 모르는 코드는 필터가 조용히 시도 전체로 바꿔 사용자가 알 수 없으므로 세션을 만들 때 막음
 # 시도 enum도 행정구역이 바뀌면 표에 없는 코드가 될 수 있어 바꾼 뒤 같은 확인을 거침
-def region_code(value: str, regions: RegionIndex) -> str:
+def region_code(value: str, regions: RegionIndex, field: str = "profile.region") -> str:
     code = LEGACY_SIDO_CODES[value] + "000" if value in LEGACY_SIDO_CODES else value
     if REGION_CODE.fullmatch(code) and regions.is_profile_code(code):
         return code
-    raise ValidationFailedError("profile.region", "지원하지 않는 지역 코드입니다.")
+    raise ValidationFailedError(field, "지원하지 않는 지역 코드입니다.")
 
 
 def to_session_profile(profile: Profile) -> SessionProfile:
