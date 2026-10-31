@@ -143,7 +143,10 @@ class RegionIndex:
         self.sido_names = {row.sido_code: row.sido_name for row in rows}
         self._by_code: dict[str, Region] = {}
         named: list[tuple[str, Region]] = []
-        for unit, names in _sigungu_units(rows):
+        units = _sigungu_units(rows)
+        # 지역 목록 API가 필터와 같은 단위로 보여 주려고 남김
+        self.units = [unit for unit, _ in units]
+        for unit, names in units:
             for code in unit.codes:
                 self._by_code[code] = unit
             named += [(name, unit) for name in names]
@@ -201,6 +204,11 @@ class RegionIndex:
         if code[:2] in self.sido_names and code[2:] == "000":
             return True
         return self._city(code) is not None
+
+    # 구가 있는 시는 구 코드 대신 시 코드("41110")를 씀. 1차 필터가 그 시 전체로 거르므로 구를 골라도 결과가 같음
+    @staticmethod
+    def unit_code(unit: Region) -> str:
+        return unit.codes[0] if len(unit.codes) == 1 else unit.codes[0][:4] + "0"
 
     def _city(self, code: str) -> Region | None:
         if not code.endswith("0"):

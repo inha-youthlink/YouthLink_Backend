@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.api import health, internal, sessions
+from app.api import health, internal, policies, regions, sessions
 from app.core.config import get_settings
 from app.core.dependencies import limit_public_requests, verify_origin
 from app.core.errors import register_error_handlers
@@ -66,3 +66,5 @@ app.include_router(internal.router)
 # 공개 라우터는 여기서 출처 확인과 IP 요청 제한을 함께 붙임. /internal(평가 서버)과 /health(헬스 체크)는 제외
 PUBLIC_DEPENDENCIES = [Depends(verify_origin), Depends(limit_public_requests)]
 app.include_router(sessions.router, dependencies=PUBLIC_DEPENDENCIES)
+app.include_router(policies.router, dependencies=PUBLIC_DEPENDENCIES)
+app.include_router(regions.router, dependencies=PUBLIC_DEPENDENCIES)

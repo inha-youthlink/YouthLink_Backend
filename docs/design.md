@@ -118,13 +118,15 @@ YouthLink_Backend/
 │  │  ├─ internal.py             # POST /internal/pipeline (저장 없음, 계속 유지)
 │  │  ├─ health.py               # GET /health
 │  │  ├─ sessions.py             # 공개 API: 세션 4개 + 채팅 SSE (6주차 rooms.py를 대체)
-│  │  ├─ policies.py             [+ 공개 API 2] 정책 검색·상세
+│  │  ├─ policies.py             # 공개 API: 정책 검색·상세 (공개 API 2)
+│  │  ├─ regions.py              # 공개 API: 지역 목록 (공개 API 2)
 │  │  └─ scraps.py               [+ 공개 API 2] 스크랩
 │  ├─ schemas/
 │  │  ├─ pipeline.py             # Profile, PipelineInput/Output, Chunk, PolicyItem, PUBLIC_TRACE_KEYS
 │  │  ├─ analysis.py             [+ 7주차] LLM 구조화 출력
 │  │  ├─ chat.py                 # 채팅 저장 기록(MessageItem), 질문 길이 상한
-│  │  ├─ public.py               # 공개 API 공통: camelCase, +09:00 일시, 오류 응답
+│  │  ├─ public.py               # 공개 API 공통: camelCase, +09:00 일시, 오류 응답, 페이지(Page)
+│  │  ├─ policy.py               # 공개 API 정책 상세(PolicyDetail)·지역 목록, 검색 상한
 │  │  └─ session.py              # 공개 API 세션·메시지·카드(PolicySummary)·채팅 요청
 │  ├─ llm/
 │  │  └─ client.py               # embed(), chat() — OpenAI 호출의 유일한 통로
@@ -159,10 +161,12 @@ YouthLink_Backend/
 │  │  └─ generator.py            # 프롬프트 조립 + 답변 생성
 │  ├─ services/
 │  │  ├─ chat_service.py         # 소유 확인 → 파이프라인 → 한 트랜잭션 저장, 세션 응답 변환
+│  │  ├─ policy_service.py       # 정책 검색(1차 필터 조건 재사용)·상세, 지역 목록
+│  │  ├─ policy_detail.py        # 상세의 자격 문장 조립, 빈 칸 안내 문구
 │  │  └─ chat_skeleton.py        # 채팅 SSE 뼈대 (RAG 없이 고정 문장, 본구현에서 대체)
 │  ├─ repositories/
 │  │  ├─ vector_repository.py    # policy_chunk 벡터 검색 (읽기)
-│  │  ├─ policy_repository.py    # policy 조회 (읽기)
+│  │  ├─ policy_repository.py    # policy 조회·1차 필터·정책 검색·상세 (읽기)
 │  │  ├─ common_code_repository.py  # common_code 코드 → 이름 조회 (읽기)
 │  │  └─ chat_repository.py      # 채팅 테이블 읽기·쓰기 (SQLAlchemy Core, ORM 모델 없음)
 │  └─ prompts/
@@ -267,12 +271,13 @@ POST /internal/pipeline   PipelineInput → PipelineOutput (저장 없음)
 - SSE의 `policies`는 답변 첫 줄(`[소개: …]`)로 카드가 정해지는 즉시 본문보다 먼저 보낸다 (12절, 응답 속도)
 - 프론트와 협의할 것(카드 신청 상태, 카테고리 대응, 정책 지역 표시, 세션 제목, 상세 필드 등): [weekly/week08.md](weekly/week08.md) 7절, 백엔드 답변은 [api-contract.md](api-contract.md)
 
-**구현 상태** (공개 API 1-1, 1-2 프로필·카드 형식)
+**구현 상태** (공개 API 1-1, 1-2, 2)
 - 됨: 공통 규칙(`X-Client-Id` UUID v4, 오류 형식, 422 → `400 VALIDATION_FAILED`, 일시 `+09:00`), 세션 4개, 채팅 SSE 뼈대(RAG 없이 계약 §5.4 조건, 세션·입력 오류는 시작 전에 JSON)
 - 프로필·카드 (계약 v0.6 4절): 세션 프로필은 계약 enum 8항목 필수, `services/profile_codes.py`에서 DB 코드 `Profile`로 바꿔 저장하고 응답은 다시 계약 형식으로. 모르는 지역 코드는 세션을 만들 때 400. 세션 `category` 없음(B3). 카드에 `category`(H1, 정책 대분류 첫 번째)
 - 과도기 호환 (계약 4.6, 프론트가 바뀌면 지움): 프로필 `region`의 시도 enum, 세션 생성의 `category` 무시, 카드의 v0.3 `region`
 - 파이프라인 스트리밍 (1-2): `stream_pipeline()`이 카드 → 본문 조각 → `PipelineOutput` 순서로 내보냄 (B9). 답변 첫 줄 `[소개: …]`를 받는 즉시 카드를 정하고, 40자가 넘도록 줄바꿈이 없으면 카드 줄이 아니라고 봄. `/internal`의 `run_pipeline()`은 같은 스트림을 모아 한 번에 돌려줘 결과·trace가 같음. trace `latency_ms.first_token` 추가 (질문을 받고 첫 본문 조각까지)
 - 채팅 연결 (1-2): `/chat`이 `stream_pipeline()`을 SSE로 보냄 (`policies`는 카드가 있을 때만). 질문은 스트림 전에 저장, 답변·카드·현재 정책은 `done` 직전에 한 트랜잭션. `clientMessageId` 멱등 처리(계약 §5.3, 다시 보내기도 B9 순서), 세션 단위 메모리 잠금(`409 STREAM_IN_PROGRESS`, 해제 못 한 잠금은 5분 뒤 만료). 연결이 끊기면 각 층의 스트림을 `aclosing`으로 바로 닫아 LLM 스트림까지 멈춤. 스트림 중 실패는 `error` 이벤트(`RAG_TIMEOUT`/`RAG_UPSTREAM_ERROR`/`INTERNAL_ERROR`). 하루 LLM 상한은 실제 생성 때만 셈. 뼈대는 `CHAT_SKELETON_ENABLED=true`일 때만 (R2 확인 뒤 삭제)
+- 정책 검색·상세, 지역 목록 (공개 API 2, 계약 v0.7 4.4): 검색은 1차 필터의 WHERE 조립(`_filter_where`)에 분류·검색어 조건을 더하고, 정렬(진행 중 → 예정 → 상시 → 정보 없음 → 마감)과 페이지는 SQL에서 함. 정렬 그룹 판단은 `application_status()`와 같은 순서. 지역은 프로필과 같은 `RegionIndex`로 검증·범위 변환하고, 지역 목록도 같은 단위(구가 있는 시는 시 코드)로 만들어 목록의 코드가 모두 프로필·검색에 쓰임. 상세 `eligibility`는 1차 필터와 같은 값(나이·소득 상한·코드)으로 조립하고, 빈 칸은 확인할 곳 안내 문구. 사용자별 응답이 아니라 `Cache-Control`은 붙이지 않음
 
 ---
 
