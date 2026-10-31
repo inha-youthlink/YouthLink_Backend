@@ -24,7 +24,7 @@ def get_policy_service(policy_repository: PolicyRepository = Depends(get_policy_
 
 
 Service = Annotated[PolicyService, Depends(get_policy_service)]
-# 공백만 있는 검색어는 검색어 없음으로 봄
+# 공백만 있는 검색어는 검색어 없음으로 봄. 빈 값(keyword=, region=)도 조건 없음
 Keyword = Annotated[str, StringConstraints(strip_whitespace=True, max_length=KEYWORD_MAX_CHARS)]
 
 
@@ -32,9 +32,9 @@ Keyword = Annotated[str, StringConstraints(strip_whitespace=True, max_length=KEY
 async def search_policies(
     service: Service,
     keyword: Annotated[Keyword | None, Query()] = None,
-    category: Annotated[SearchCategory | None, Query()] = None,
+    category: Annotated[SearchCategory, Query()] = None,
     region: Annotated[str | None, Query(max_length=20)] = None,
     page: Annotated[int, Query(ge=0, le=10_000)] = 0,
     size: Annotated[int, Query(ge=1, le=PAGE_SIZE_MAX)] = 20,
 ) -> Page[PolicySummary]:
-    return await service.search(keyword or None, category, region, page, size)
+    return await service.search(keyword or None, category, region or None, page, size)

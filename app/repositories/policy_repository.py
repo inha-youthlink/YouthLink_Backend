@@ -33,7 +33,8 @@ _STATUS_GROUP_SQL = """CASE
         ELSE 0
     END"""
 
-# 진행 중은 마감 임박, 예정은 시작 임박, 마감은 최근 마감 순. 나머지와 같은 날짜는 최신 정책 먼저 (정책 번호가 등록일로 시작함)
+# 진행 중은 마감 임박, 예정은 시작 임박, 마감은 최근 마감 순
+# 상시·정보 없음 그룹과, 날짜가 같은 정책은 최신 정책 먼저 (정책 번호가 등록일로 시작함)
 # 페이지가 바뀌어도 순서가 흔들리지 않게 마지막에 정책 번호로 정함
 _SEARCH_ORDER_SQL = """status_group,
     CASE WHEN status_group = 0 THEN application_end_date END ASC NULLS LAST,

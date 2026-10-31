@@ -11,7 +11,16 @@ PAGE_SIZE_MAX = 50
 
 # 과도기 호환: v0.3 프론트의 FINANCE는 데이터에서 복지와 한 묶음이라 WELFARE로 받음. 프론트가 바뀌면 삭제
 LEGACY_SEARCH_CATEGORIES = {"FINANCE": PolicyCategory.WELFARE}
-SearchCategory = Annotated[PolicyCategory, BeforeValidator(lambda value: LEGACY_SEARCH_CATEGORIES.get(value, value))]
+
+
+# 빈 값(category=)은 검색어와 같이 조건 없음으로 봄
+def _search_category(value: object) -> object:
+    if value == "":
+        return None
+    return LEGACY_SEARCH_CATEGORIES.get(value, value) if isinstance(value, str) else value
+
+
+SearchCategory = Annotated[PolicyCategory | None, BeforeValidator(_search_category)]
 
 
 class RegionOption(PublicModel):
