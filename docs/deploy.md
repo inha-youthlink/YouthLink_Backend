@@ -7,20 +7,23 @@
 ## 1. 실행 조건
 ```
 브라우저 ──HTTPS──▶ Vercel ──/api/*──▶ 백엔드:8000 ──▶ PostgreSQL + pgvector
-평가 서버 ─────────────/internal/*───▶ 백엔드:8000  └─▶ OpenAI API
+평가 서버 ─────────────/internal/*───▶ 백엔드:8000  └─▶ Bedrock 게이트웨이 (OpenAI 호환)
 ```
 - 실행 명령: `uvicorn app.main:app --host 0.0.0.0 --port 8000` (의존성은 `uv sync --frozen --no-dev`로 `uv.lock` 그대로 설치)
 - 헬스 체크 `GET /health`: DB·OpenAI는 확인하지 않고 항상 빠르게 200
 - **워커(프로세스)는 하나**로 띄웁니다. 요청 제한 횟수를 프로세스 메모리에 세서, 여러 개면 따로 셉니다
 - 비밀 값(`.env`)은 이미지에 넣지 않고 실행할 때 환경 변수로 넣습니다
 - DB 스키마와 정책 데이터는 ETL 저장소가 만듭니다. 채팅 테이블은 ETL 마이그레이션 008(이후 009)이 적용돼 있어야 합니다
+- **정책 청크가 `bedrock-titan-embed-v2`(1024차원)로 임베딩돼 있어야 합니다** (ETL 마이그레이션 013 뒤 재임베딩). 예전 `text-embedding-3-small`(1536차원) DB에서는 질문 검색이 실패합니다
 
 ## 2. 환경 변수
 전체 목록과 기본값은 `.env.example`에 있습니다. 운영에서 꼭 볼 것:
 
 | 변수 | 운영 값 | 설명 |
 |---|---|---|
-| `OPENAI_API_KEY` | 필수 | |
+| `OPENAI_API_KEY` | 필수 | Bedrock 게이트웨이에서 받은 키 |
+| `OPENAI_BASE_URL` | 필수 | Bedrock 게이트웨이 주소 (`https://…/v1`). 비우면 OpenAI에 바로 붙어 게이트웨이 키로는 401 |
+| `EMBEDDING_MODEL`, `CHAT_MODEL` | 비움 (기본값) | 기본 `bedrock-titan-embed-v2`, `bedrock-gpt-5.6-luna`. 임베딩 모델은 ETL과 반드시 같아야 함 |
 | `DATABASE_URL` | 필수 | `postgresql+asyncpg://user:password@host:5432/dbname`. 컨테이너 안에서 호스트의 DB에 붙을 때 `localhost`는 컨테이너 자신을 가리킴 |
 | `APP_ENV` | `prod` | API 문서(`/docs`)를 끄고, 아래 안전 설정이 없으면 **시작하지 않음** |
 | `DEBUG` | 비움 | `prod`에서 `true`면 시작하지 않음 (오류 화면에 내부 정보가 나감) |
@@ -46,7 +49,7 @@
 | 응답 헤더 | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Content-Security-Policy` |
 
 - 횟수와 채팅 "답변 생성 중" 표시는 메모리에 있어 **프로세스를 새로 띄우면 초기화**됩니다 (워커 하나여야 하는 이유)
-- OpenAI 계정의 월 예산 상한은 키 관리자가 따로 설정합니다 (모든 방어가 뚫려도 비용이 멈추는 마지막 장치)
+- 게이트웨이 키는 팀 공용 예산에서 나갑니다. 예산 상한은 게이트웨이 운영자가 관리합니다 (모든 방어가 뚫려도 비용이 멈추는 마지막 장치)
 
 ## 4. 프록시(Nginx 등)를 앞에 둘 때
 없어도 됩니다 (Vercel → 백엔드 8000 직접). 두면 HTTPS(Let's Encrypt)를 붙이기 쉽습니다. 채팅이 SSE(긴 스트리밍 응답)라 아래 설정이 필요합니다:

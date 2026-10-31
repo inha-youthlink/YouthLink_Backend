@@ -1,5 +1,6 @@
 -- ETL 저장소 db/migrations 001~004, 007 복사본 (youthlink-data-pipeline 3159385)
 -- region 테이블과 지역 해석 View. db/schema.sql에 포함되지 않아 테스트 DB 구성용으로 따로 둠
+-- 014(대전 상위 코드 매핑)는 지역 행을 참조하는 데이터라 넣지 않음 (테스트는 지역을 직접 넣음). 7c536f7 기준 001~004·007은 바뀌지 않음
 
 -- ===== 001_add_region_master.sql =====
 BEGIN;

@@ -17,7 +17,7 @@ YouthLink RAG 기반 청년 지원 챗봇 및 신청 가이드 시스템의 백�
 - Python 3.12, [uv](https://docs.astral.sh/uv/)
 - FastAPI, Uvicorn, Pydantic, pydantic-settings
 - PostgreSQL + pgvector, SQLAlchemy 2.1 (async), asyncpg
-경- LLM: Bedrock 게이트웨이(OpenAI 호환, OpenAI SDK로 호출). 임베딩 `bedrock-titan-embed-v2`(1024차원), 답변 생성 `bedrock-gpt-5.6-luna`
+- LLM: Bedrock 게이트웨이(OpenAI 호환, OpenAI SDK로 호출). 임베딩 `bedrock-titan-embed-v2`(1024차원), 답변 생성 `bedrock-gpt-5.6-luna`
 
 ## 시작하기
 
