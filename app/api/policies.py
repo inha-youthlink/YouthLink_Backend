@@ -5,7 +5,12 @@ from pydantic import StringConstraints
 
 from app.core.dependencies import get_client_id, get_policy_repository
 from app.repositories.policy_repository import PolicyRepository
-from app.schemas.policy import KEYWORD_MAX_CHARS, PAGE_SIZE_MAX, SearchCategory
+from app.schemas.policy import (
+    KEYWORD_MAX_CHARS,
+    PAGE_SIZE_MAX,
+    PolicyDetail,
+    SearchCategory,
+)
 from app.schemas.public import ErrorResponse, Page
 from app.schemas.session import PolicySummary
 from app.services.policy_service import PolicyService
@@ -38,3 +43,8 @@ async def search_policies(
     size: Annotated[int, Query(ge=1, le=PAGE_SIZE_MAX)] = 20,
 ) -> Page[PolicySummary]:
     return await service.search(keyword or None, category, region or None, page, size)
+
+
+@router.get("/{policy_id}", responses={status.HTTP_404_NOT_FOUND: {"model": ErrorResponse}})
+async def get_policy(policy_id: str, service: Service) -> PolicyDetail:
+    return await service.get_detail(policy_id)

@@ -6,7 +6,12 @@ from fastapi.testclient import TestClient
 from app.api.policies import get_policy_service
 from app.main import app
 from app.pipeline.conditions import RegionIndex
-from app.repositories.policy_repository import PolicyFilter, PolicyRecord, RegionRow
+from app.repositories.policy_repository import (
+    PolicyDetailRecord,
+    PolicyFilter,
+    PolicyRecord,
+    RegionRow,
+)
 from app.schemas.policy import RegionOption
 from app.services.policy_service import PolicyService
 from tests.conftest import HEADERS, REGIONS, FakePolicyRepository
@@ -24,6 +29,24 @@ RECORD = PolicyRecord(
     large_categories=["주거"],
 )
 
+DETAIL = PolicyDetailRecord(
+    record=RECORD,
+    description=" 월세를 지원합니다. ",
+    support_content="월 20만 원",
+    application_method="온라인 신청",
+    submission_documents="  ",
+    additional_qualification=None,
+    participation_exclusion=None,
+    operating_org_name="서울청년센터",
+    min_age=19,
+    max_age=39,
+    income_condition_code="0043001",
+    min_income=None,
+    max_income=None,
+    income_etc=None,
+    marriage_name="제한없음",
+)
+
 
 class SearchPolicyRepository(FakePolicyRepository):
     def __init__(self, records: list[PolicyRecord], total: int, regions: list[RegionRow] = REGIONS) -> None:
@@ -31,6 +54,7 @@ class SearchPolicyRepository(FakePolicyRepository):
         self.total = total
         self.regions = regions
         self.calls: list[tuple[PolicyFilter, int, int]] = []
+        self.detail_calls: list[str] = []
 
     async def list_regions(self) -> list[RegionRow]:
         return self.regions
@@ -41,6 +65,10 @@ class SearchPolicyRepository(FakePolicyRepository):
 
     async def get_region_labels(self, policy_nos):
         return {"P-1": "서울특별시"}
+
+    async def get_detail(self, policy_no):
+        self.detail_calls.append(policy_no)
+        return DETAIL if policy_no == "P-1" else None
 
 
 @pytest.fixture
@@ -230,6 +258,51 @@ def test_search_validation(client, repo, params, field):
 
 def test_search_requires_client_id(client):
     response = client.get("/api/policies")
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "INVALID_CLIENT_ID"
+
+
+def test_policy_detail(client):
+    response = client.get("/api/policies/P-1", headers=HEADERS)
+
+    assert response.status_code == 200
+    assert "cache-control" not in response.headers
+    body = response.json()
+    # 카드 필드는 검색 결과와 같음
+    assert body["id"] == "P-1"
+    assert body["regionLabel"] == "서울특별시"
+    assert body["sourceUrl"] == "https://www.example.com"
+    # 카드의 담당 기관은 주관 기관 그대로 (B7)
+    assert body["organization"] == "서울특별시"
+    assert {key: body[key] for key in ("summary", "eligibility", "benefits", "howToApply", "requiredDocuments")} == {
+        "summary": "월세를 지원합니다.",
+        "eligibility": "- 나이: 만 19~39세\n- 소득: 무관",
+        "benefits": "월 20만 원",
+        "howToApply": "온라인 신청",
+        # 공백만 있는 원문은 비어 있는 것으로 봄
+        "requiredDocuments": "공고에 나와 있지 않아요. 담당 기관(서울특별시, 운영: 서울청년센터)에 문의하거나 관련 사이트를 참고해 주세요.",
+    }
+
+
+def test_policy_detail_not_found(client, repo):
+    response = client.get("/api/policies/P-404", headers=HEADERS)
+
+    assert response.status_code == 404
+    assert response.json() == {"code": "POLICY_NOT_FOUND", "message": "정책을 찾을 수 없습니다."}
+
+
+# DB 컬럼보다 긴 ID는 조회하지 않고 같은 404
+def test_policy_detail_long_id(client, repo):
+    response = client.get("/api/policies/" + "1" * 31, headers=HEADERS)
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "POLICY_NOT_FOUND"
+    assert repo.detail_calls == []
+
+
+def test_policy_detail_requires_client_id(client):
+    response = client.get("/api/policies/P-1")
 
     assert response.status_code == 400
     assert response.json()["code"] == "INVALID_CLIENT_ID"

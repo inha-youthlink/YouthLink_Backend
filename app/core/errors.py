@@ -93,6 +93,11 @@ class SessionNotFoundError(ApiError):
         super().__init__(status.HTTP_404_NOT_FOUND, "SESSION_NOT_FOUND", "세션을 찾을 수 없습니다.")
 
 
+class PolicyNotFoundError(ApiError):
+    def __init__(self) -> None:
+        super().__init__(status.HTTP_404_NOT_FOUND, "POLICY_NOT_FOUND", "정책을 찾을 수 없습니다.")
+
+
 def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ApiError, _handle_api_error)
     app.add_exception_handler(RequestValidationError, _handle_validation_error)

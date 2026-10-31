@@ -9,7 +9,9 @@ from app.schemas.pipeline import PolicyItem
 from app.schemas.policy_info import ALWAYS_OPEN_CODE, CLOSED_CODE, application_status, category_of, clean_url
 
 NO_RESTRICTION_MARRIAGE_CODE = "0055003"
+NO_INCOME_LIMIT_CODE = "0043001"
 ANNUAL_INCOME_CODE = "0043002"
+OTHER_INCOME_CODE = "0043003"
 # 정책 소득 상한은 만 원 단위인데 원 단위로 들어간 값이 섞여 있어(예: 43,056,240) 이 이상은 판정하지 않음
 MAX_INCOME_MANWON = 100_000
 
@@ -41,6 +43,25 @@ _SEARCH_ORDER_SQL = """status_group,
     CASE WHEN status_group = 1 THEN application_start_date END ASC,
     CASE WHEN status_group = 4 THEN application_end_date END DESC NULLS LAST,
     policy_no DESC"""
+
+_GET_DETAIL_SQL = text(f"""
+SELECT {_RECORD_COLUMNS},
+       p.description, p.support_content, p.application_method, p.submission_documents,
+       p.additional_qualification, p.participation_exclusion, p.operating_org_name,
+       p.min_age, p.max_age, p.income_condition_code, p.min_income, p.max_income, p.income_etc,
+       c.code_name AS marriage_name
+FROM policy p
+LEFT JOIN common_code c ON c.code = p.marriage_status_code
+WHERE p.policy_no = :policy_no
+""")
+
+_GET_ELIGIBILITY_NAMES_SQL = text("""
+SELECT e.condition_type, c.code_name
+FROM policy_eligibility_code e
+JOIN common_code c ON c.code = e.condition_code
+WHERE e.policy_no = :policy_no
+ORDER BY e.condition_type, e.condition_code
+""")
 
 _LIST_REGIONS_SQL = text("""
 SELECT region_code, sido_code, sido_name, sigungu_name
@@ -137,6 +158,31 @@ class PolicyRecord:
         )
 
 
+# 정책 상세 (공개 API). 문장 조립은 서비스에서 함
+@dataclass(frozen=True)
+class PolicyDetailRecord:
+    record: PolicyRecord
+    description: str | None
+    support_content: str | None
+    application_method: str | None
+    submission_documents: str | None
+    additional_qualification: str | None
+    participation_exclusion: str | None
+    operating_org_name: str | None
+    min_age: int | None
+    max_age: int | None
+    income_condition_code: str | None
+    min_income: int | None
+    max_income: int | None
+    income_etc: str | None
+    marriage_name: str | None
+    # condition_type(JOB, SCHOOL, MAJOR, SPECIAL) → 코드 이름
+    eligibility_names: dict[str, list[str]] = field(default_factory=dict)
+
+
+_RECORD_FIELDS = frozenset(PolicyRecord.__dataclass_fields__)
+
+
 class PolicyRepository:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
@@ -161,6 +207,20 @@ class PolicyRepository:
             result = await session.execute(text(sql), params)
             return list(result.scalars())
 
+    async def get_detail(self, policy_no: str) -> PolicyDetailRecord | None:
+        async with self._session_factory() as session:
+            row = (await session.execute(_GET_DETAIL_SQL, {"policy_no": policy_no})).mappings().first()
+            if row is None:
+                return None
+            names: dict[str, list[str]] = {}
+            for code in (await session.execute(_GET_ELIGIBILITY_NAMES_SQL, {"policy_no": policy_no})).mappings():
+                names.setdefault(code["condition_type"], []).append(code["code_name"])
+        return PolicyDetailRecord(
+            record=PolicyRecord(**{key: value for key, value in row.items() if key in _RECORD_FIELDS}),
+            eligibility_names=names,
+            **{key: value for key, value in row.items() if key not in _RECORD_FIELDS},
+        )
+
     # 전체 개수는 요청한 페이지가 범위를 넘어 비어 있어도 알려야 해서 따로 셈
     async def search(
         self, policy_filter: PolicyFilter, today: date, offset: int, limit: int
@@ -183,7 +243,7 @@ OFFSET :offset LIMIT :limit
             total = (await session.execute(count_sql, params)).scalar_one()
             result = await session.execute(page_sql, params)
             records = [
-                PolicyRecord(**{key: value for key, value in row.items() if key != "status_group"})
+                PolicyRecord(**{key: value for key, value in row.items() if key in _RECORD_FIELDS})
                 for row in result.mappings()
             ]
         return records, total

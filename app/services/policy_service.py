@@ -1,14 +1,19 @@
 import math
 
+from app.core.errors import PolicyNotFoundError
 from app.pipeline.conditions import RegionIndex
 from app.repositories.policy_repository import PolicyFilter, PolicyRepository
-from app.schemas.policy import RegionOption, SidoRegions
+from app.schemas.policy import PolicyDetail, RegionOption, SidoRegions
 from app.schemas.policy_info import CATEGORY_NAMES, today_kst
 from app.schemas.public import Page
 from app.schemas.session import POLICY_CATEGORIES, PolicyCategory, PolicySummary
+from app.services.policy_detail import clean_text, eligibility_text, missing_text
 from app.services.profile_codes import region_code
 
 _CATEGORY_BY_POLICY_CATEGORY = {policy_category: category for category, policy_category in POLICY_CATEGORIES.items()}
+
+# policy.policy_no 컬럼 길이
+POLICY_ID_MAX_CHARS = 30
 
 # 시도 코드 순서는 새 코드(전남광주 12, 강원 51, 전북 52) 때문에 화면 순서로 쓸 수 없어 따로 정함
 # 수도권 먼저, 그 뒤는 행정 표준 순서. 전남광주는 통합특별시라 옛 광주광역시 자리. 목록에 없는 시도는 맨 뒤에 코드 순
@@ -63,6 +68,23 @@ class PolicyService:
             for record in records
         ]
         return Page(items=items, page=page, size=size, total_elements=total, total_pages=math.ceil(total / size))
+
+    async def get_detail(self, policy_id: str) -> PolicyDetail:
+        # DB 컬럼(VARCHAR(30))보다 긴 ID는 있을 수 없어 조회하지 않음
+        detail = await self._policy_repository.get_detail(policy_id) if len(policy_id) <= POLICY_ID_MAX_CHARS else None
+        if detail is None:
+            raise PolicyNotFoundError
+        labels = await self._policy_repository.get_region_labels([policy_id])
+        summary = PolicySummary.from_item(detail.record.to_item(0.0, today_kst(), labels.get(policy_id)))
+        missing = missing_text(summary.source_url, summary.organization, detail.operating_org_name)
+        return PolicyDetail(
+            **summary.model_dump(),
+            summary=clean_text(detail.description) or missing,
+            eligibility=eligibility_text(detail),
+            benefits=clean_text(detail.support_content) or missing,
+            how_to_apply=clean_text(detail.application_method) or missing,
+            required_documents=clean_text(detail.submission_documents) or missing,
+        )
 
 
 def _sido_sort_key(item: tuple[str, str]) -> tuple[int, str]:

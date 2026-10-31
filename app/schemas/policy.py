@@ -3,7 +3,7 @@ from typing import Annotated
 from pydantic import BeforeValidator
 
 from app.schemas.public import PublicModel
-from app.schemas.session import PolicyCategory
+from app.schemas.session import PolicyCategory, PolicySummary
 
 # 정책 검색 상한 (계약 4.4). 문장이 아니라 낱말로 찾는 검색이라 검색어를 짧게 둠
 KEYWORD_MAX_CHARS = 50
@@ -33,3 +33,13 @@ class SidoRegions(PublicModel):
     code: str
     name: str
     sigungu: list[RegionOption]
+
+
+# 정책 상세 (계약 4.3, B7). 문장은 서비스가 정책 원문으로 만들고, 비어 있으면 확인할 곳을 안내하는 문구를 넣음
+class PolicyDetail(PolicySummary):
+    summary: str
+    eligibility: str
+    benefits: str
+    how_to_apply: str
+    # 원문이 자유 문장이라 목록이 아니라 문자열 하나
+    required_documents: str
