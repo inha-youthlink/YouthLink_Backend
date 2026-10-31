@@ -93,6 +93,10 @@ MIXED_REGIONS = [
     RegionRow("41", "경기도", "고양시 덕양구", "41281"),
     RegionRow("41", "경기도", "고양시 일산동구", "41285"),
     RegionRow("36", "세종특별자치시", "세종특별자치시", "36110"),
+    RegionRow("28", "인천광역시", "부평구", "28237"),
+    RegionRow("26", "부산광역시", "중구", "26110"),
+    # 순서 목록에 없는 새 시도
+    RegionRow("99", "새특별자치도", "새시", "99110"),
 ]
 
 
@@ -109,6 +113,8 @@ async def test_region_codes_round_trip():
     assert {code: options[code] for code in ("41110", "41130", "41190", "41280")} == {
         "41110": "수원시", "41130": "성남시", "41190": "부천시", "41280": "고양시",
     }
+    # 수도권 먼저, 그 뒤는 행정 표준 순서, 모르는 시도는 맨 뒤
+    assert [group.code for group in groups] == ["11000", "41000", "28000", "26000", "36000", "99000"]
     # 세종은 "전체" 하나
     assert next(group.sigungu for group in groups if group.code == "36000") == [
         RegionOption(code="36000", name="세종특별자치시 전체")
