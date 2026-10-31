@@ -1,6 +1,6 @@
 # 프론트 연동 현황 (임시 문서)
 
-- 기준: 2026-10-29, 백엔드 `main` (공개 API 1-1 #38, 배포 준비 #39, 공개 API 1-2 프로필·카드 형식)
+- 기준: 2026-11-01, 백엔드 `main` (공개 API 1-1 #38, 배포 준비 #39, 공개 API 1-2 #41~#43, 공개 API 2 정책 검색·상세·지역 목록)
 - 범위: 지금 백엔드 서버가 실제로 어디까지 되는지와 임시 형식. **약속(계약)은 [api-contract.md](api-contract.md)**, 이 문서는 구현 현황만 적는다
 - 계약 본문(4절)이 채워지고 실연동이 끝나면 이 문서는 지운다
 
@@ -12,11 +12,14 @@
 | `GET /api/sessions/{id}` | 됨 | |
 | `GET /api/sessions/{id}/messages` | 됨 | 오래된 순. 질문의 `policies`는 `null`, 카드 없는 답변은 `[]`. 질문에는 보낸 `clientMessageId`가 있음 (답변은 `null`). 연결이 끊기거나 생성이 실패한 질문은 답변 없이 남음 |
 | `POST /api/sessions/{id}/chat` | **됨 (실제 RAG)** | 2절. 배포 경로 SSE 확인용 뼈대는 서버 설정으로만 켬 (2-1) |
-| 요약·추천, 정책 검색·상세, 스크랩, 가이드 PDF | 아직 | mock 유지 |
+| `GET /api/policies` | **됨** | 2-2절. 페이지 응답 `{items, page, size, totalElements, totalPages}`, 항목은 채팅 카드와 같은 형식 |
+| `GET /api/policies/{id}` | **됨** | 2-2절. `requiredDocuments`는 문자열 하나, 문자열에 줄바꿈 있음 |
+| `GET /api/regions` | **됨 (새 API)** | 2-2절. 시도 → 시군구 두 단계 선택용 |
+| 요약·추천, 스크랩, 가이드 PDF | 아직 | mock 유지 (`VITE_MOCK_FEATURES=summary,guides,scraps`) |
 
 공통 규칙은 계약대로 동작함
 - `X-Client-Id`(UUID v4)가 없거나 형식이 틀리면 `400 INVALID_CLIENT_ID`. 대문자·하이픈 없는 형태도 같은 ID로 받음
-- 다른 사용자의 세션, 없는 세션, UUID가 아닌 세션 id는 모두 `404 SESSION_NOT_FOUND`
+- 다른 사용자의 세션, 없는 세션, UUID가 아닌 세션 id는 모두 `404 SESSION_NOT_FOUND`. 없는 정책은 `404 POLICY_NOT_FOUND`
 - 오류는 `{code, message, details}`. 입력 검증 실패는 `400 VALIDATION_FAILED` + `details: [{field, reason}]` (`field`는 `profile.age`, `content`처럼 요청 필드 이름, `reason`은 한국어). 없는 경로 `404 NOT_FOUND`, 허용되지 않는 메서드 `405 METHOD_NOT_ALLOWED`, 그 외 `500 INTERNAL_ERROR`
 - 일시는 `+09:00` (예: `2026-10-25T20:38:26.355621+09:00`, 소수점 초가 붙을 수 있음)
 
@@ -71,6 +74,28 @@ curl -N -X POST <주소>/api/sessions/<id>/chat \
 
 백엔드 로컬 확인 결과: 첫 token 15.00초, 간격 중앙값·최대 1.00초, ping 최대 간격 15.00초, `policies` → `done`으로 끝남. 연결을 중간에 끊으면 서버가 바로 멈춤
 
+## 2-2. 정책 검색·상세, 지역 목록
+자세한 규칙은 계약 4.3·4.4
+
+**검색 `GET /api/policies?keyword=&category=&region=&page=0&size=20`**
+- 모두 선택. 빈 값은 조건 없음. `keyword` 50자 이하(띄어쓰기로 나눈 낱말이 모두 있어야 걸림), `category`는 5개(`JOB`, `HOUSING`, `EDUCATION`, `WELFARE`, `PARTICIPATION`), `region`은 지역 목록의 코드, `size` 1~50. 어기면 `400 VALIDATION_FAILED` (`details[].field`가 쿼리 이름)
+- 지역은 "고른 지역 + 그 시도 전체 + 전국" 정책을 보여 줌 (채팅 추천과 같은 범위)
+- 정렬: 진행 중(마감 임박 순) → 예정(시작 임박 순) → 상시 → 기간 정보 없음 → 마감(최근 마감 순). **mock의 `byAvailability`와 다를 수 있음**
+- 응답 시간 약 0.3~0.4초 (대부분 지역 표시 조회. 응답 속도 작업 때 줄임)
+
+**상세 `GET /api/policies/{id}`**
+- 카드 필드 + `summary`, `eligibility`, `benefits`, `howToApply`, `requiredDocuments`. **모두 문자열**이고 줄바꿈(`\n`)이 있어 `white-space: pre-line`처럼 줄바꿈을 살려 표시
+- `requiredDocuments`는 v0.3의 `string[]`이 아니라 `string` (원본이 자유 문장)
+- `eligibility`는 서버가 만든 여러 줄 (`- 나이: 만 19~39세`, `- 소득: 무관`, … 뒤에 `추가 자격`·`참여 제한 대상` 원문)
+- 신청 방법·제출 서류가 비어 있으면 안내 문구가 들어 있음 (예: "공고에 나와 있지 않아요. 담당 기관(서울특별시)에 문의해 주세요."). 프론트에서 따로 빈 값 처리를 하지 않아도 됨
+- 링크 버튼(`sourceUrl`)은 `null`인 정책이 많음 (3,543건 중 2,431건, 약 69%. 신청 URL이 비었거나 주소 모양이 아닌 값). 절반 이상이 기관 홈페이지 첫 화면이라 버튼 문구는 "관련 사이트"처럼 중립적으로 (B7)
+
+**지역 목록 `GET /api/regions`**
+- `[{code, name, sigungu: [{code, name}]}]`. 시도를 고르면 그 시도의 `sigungu`를 보여 주고, 첫 항목은 "○○ 전체"(`○○000`)
+- 시도 순서는 서버가 정함 (서울 → 경기 → 인천 → 행정 표준 순서). 받은 순서대로 그리면 됨
+- 프로필 입력과 정책 검색의 지역 선택 모두 이 목록의 `code`를 그대로 보냄. 구가 있는 시는 시 하나(수원시 `41110`)
+- 옛 광주광역시의 구는 지역 표 이름 그대로 "동구", "서구"처럼 보임 (전남광주통합특별시 아래)
+
 ## 3. 형식과 과도기 호환
 세션·카드는 계약 4절(v0.6) 형식. 프론트가 아직 v0.3 형식이어도 첫 실연동이 깨지지 않게 아래를 함께 받거나 보냄 (계약 4.6, 프론트가 바뀌면 지움)
 
@@ -80,8 +105,10 @@ curl -N -X POST <주소>/api/sessions/<id>/chat \
 | 응답의 `profile` | 같은 형식. `region`은 5자리 코드 (`SEOUL`로 만들었으면 `"11000"`) | 헤더의 지역 표시를 5자리 코드 기준으로 |
 | 세션 `category` | 받지 않음 (보내도 무시), 응답에도 없음 (B3) | 세션 생성 화면의 분야 선택 제거 |
 | 첫 질문 전 `title` | `"새 대화"` | |
+| 정책 검색 `region`·`category` | 지역 목록 코드와 5개 분류. v0.3 시도 enum(`SEOUL`)은 "○○ 전체"로, `FINANCE`는 `WELFARE`로 받음 | 지역 목록 API와 5개 분류로 |
+| 정책 상세 `requiredDocuments` | 문자열 하나 | 타입을 `string`으로 (v0.3 `string[]`) |
 | 카드 (`policies`) | `id`, `title`, `category`, `applyStart`, `applyEnd`, `status`, `regionLabel`, `organization`, `sourceUrl` + 과도기 `region` (v0.3 시도 enum 또는 `NATIONWIDE`) | 카드 검사(`isPolicySummary`)를 `regionLabel` 기준으로, `category`가 `null`일 수 있음 (대분류 없는 정책 1건) |
 
 ## 4. 다음 (백엔드)
 - 서버 주소(R1): 인프라 담당자가 띄우면 이 문서에 추가 (배포 방법은 [deploy.md](deploy.md))
-- 공개 API 2: 정책 검색·상세, 요약·추천, 스크랩
+- 공개 API 2: 스크랩, 요약·추천
