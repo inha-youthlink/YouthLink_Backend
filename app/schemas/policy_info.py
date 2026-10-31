@@ -13,7 +13,7 @@ KST = ZoneInfo("Asia/Seoul")
 # URL 칸에 "전화문의", "-" 같은 글자가 들어 있는 경우가 있어 주소 모양일 때만 링크로 씀
 DOMAIN_LIKE = re.compile(r"[\w-]+(\.[\w-]+)+(/\S*)?", re.ASCII)
 
-# 정책 대분류에 옛 분류와 새 분류가 섞여 있어 둘 다 맞춤. 검색 가산점과 카드 분류가 함께 씀
+# 정책 대분류에 옛 분류와 새 분류가 섞여 있어 둘 다 맞춤. 검색 가산점, 카드 분류, 정책 검색의 분류 필터가 함께 씀
 CATEGORY_NAMES = {
     Category.JOB: frozenset({"일자리"}),
     Category.HOUSING: frozenset({"주거"}),

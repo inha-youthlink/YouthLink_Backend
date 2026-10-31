@@ -19,6 +19,15 @@ KstDateTime = Annotated[
 ]
 
 
+# 결과가 많은 목록의 페이지 (계약 §1.5). page는 0부터
+class Page[T](PublicModel):
+    items: list[T]
+    page: int
+    size: int
+    total_elements: int
+    total_pages: int
+
+
 class ErrorDetail(BaseModel):
     field: str
     reason: str
