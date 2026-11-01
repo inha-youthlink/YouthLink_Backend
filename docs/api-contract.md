@@ -138,6 +138,7 @@
   - `403 FORBIDDEN`(Vercel 출처 확인을 켰을 때), `404 NOT_FOUND`·`405 METHOD_NOT_ALLOWED`(없는 경로·메서드), `413 PAYLOAD_TOO_LARGE`(본문 256KB 초과)
   - `429 RATE_LIMITED` + `Retry-After`. 하루 LLM 상한도 같은 코드이고 `message`로 구분
   - `502 RAG_UPSTREAM_ERROR`: "LLM 호출 실패"
+  - `504 RAG_TIMEOUT`: 한 번에 받는 LLM 응답(대화 요약)이 30초를 넘김. 채팅은 같은 코드를 스트림의 `error` 이벤트로 보냄
 - 요청 제한 기준: 공개 API IP당 분당 300, 채팅 IP당 분당 60 + `X-Client-Id`당 분당 10, 서버 전체 하루 LLM 호출 1,000 (`docs/front-sync.md`)
 
 ### 4.2 코드 값 (v0.3 §2)
@@ -236,13 +237,27 @@ interface PolicyDetail extends PolicySummary {
 |---|---|---|
 | `POST /api/sessions` | 요청에 `category` 없음 (B3) | 됨 |
 | `GET /api/sessions`, `GET /api/sessions/{id}`, `GET /api/sessions/{id}/messages` | 없음. 목록은 만든 시각 내림차순 | 됨 |
-| `POST /api/sessions/{id}/summary` | 없음 | API 2 |
-| `GET /api/sessions/{id}/recommendations` | 기준이 세션 카테고리가 아니라 **대화에서 나온 분야**. 대화 전이면 프로필 기준으로 신청 가능한 정책 (B3) | API 2 |
+| `POST /api/sessions/{id}/summary` | 없음. 동작 세부는 아래 | 됨 |
+| `GET /api/sessions/{id}/recommendations` | 기준이 세션 카테고리가 아니라 **대화에서 나온 분야**. 대화 전이면 프로필 기준으로 신청 가능한 정책 (B3). 세부는 아래 | 됨 |
 | `GET /api/policies` | `category`는 4.2의 5개, `region`은 5자리 코드 (필터 범위는 4.2). 정렬에 예정·정보 없음 위치 추가 (아래) | 됨 |
 | `GET /api/policies/{id}` | 필드는 4.3 `PolicyDetail` | 됨 |
 | `GET /api/regions` | 새로 추가 (B2, 아래) | 됨 |
 | `POST /api/sessions/{id}/guides` | 없음. PDF 생성은 이번 범위 뒤, 프론트 mock 유지 (R9) | 나중 |
 | 스크랩 3개 | 없음. 목록 정렬 세부와 비활성 정책 처리는 아래 | 됨 |
+
+**추천 정책 `GET /api/sessions/{id}/recommendations`** (공개 API 2)
+- 세션 **프로필로 1차 필터**(채팅 검색과 같은 지역·나이·소득·대상 조건, 비활성 정책 제외)를 건 뒤, **대화에서 나온 분야**로 좁힘
+  - 분야: 최근 답변 3개(채팅 대화 기록 턴 수)의 질문 분석 분야 중 가장 많이 나온 것. 동률이면 더 최근 것. 분야가 없으면(대화 전, 인사·신청 방법 질문만) 프로필 기준만
+- 마감 정책은 빼고 최대 10개. 순서는 **신청 가능한 정책 우선**: 진행 중(마감 임박) → 상시 → 예정(시작 임박) → 정보 없음. 진행 중·상시가 10개를 채우면 예정은 보이지 않음 (예정은 정책 검색에서 진행 중 다음에 보임)
+- 분야 정책이 10개보다 적으면 적은 대로 (다른 분야로 채우지 않음). 비면 `[]`
+- LLM을 부르지 않음 (약 0.4초)
+
+**대화 요약 `POST /api/sessions/{id}/summary`** (공개 API 2)
+- 최근 10턴(답변까지 있는 턴)을 LLM으로 요약해 `{ "summary": "…" }`. **저장하지 않고** 요청마다 만듦
+- 2~3문장, 150자 안팎, "~습니다"체. 대화에 나온 내용만 씀. 줄바꿈이 있을 수 있음
+- 대화가 없으면 LLM을 부르지 않고 `"아직 나눈 대화가 없습니다."`
+- 요청 제한은 채팅과 같음 (IP당 분당 60회 + `X-Client-Id`당 분당 10회, 하루 LLM 상한에 셈). 넘으면 `429 RATE_LIMITED`
+- LLM 실패 `502 RAG_UPSTREAM_ERROR`, 30초 넘김 `504 RAG_TIMEOUT`. 보통 1~2초
 
 **정책 검색 `GET /api/policies`** (공개 API 2)
 - 쿼리는 모두 선택. 빈 값(`keyword=`, `category=`, `region=`)은 조건 없음
@@ -306,4 +321,4 @@ interface PolicyDetail extends PolicySummary {
 - v0.4 (2026-10-26): §1.4 표에 없는 오류 코드(413, 403, 404·405)와 하루 LLM 상한 429 추가
 - v0.5 (2026-10-29): 잠정본. 4절 계약 본문을 1~3절 제안 기준으로 채움, H1 카테고리 5개 결정, 과도기 호환(4.6)
 - v0.6 (2026-10-29): H2 매핑표와 `NONE`·`OTHER` 처리, 카드 `category` null 허용, 연소득 상한, 과도기 호환 세부 (공개 API 1-2 첫 단계 구현)
-- v0.7 (2026-11-01): 스크랩 구현 (목록 정렬은 정책 검색과 같게, 같은 날짜는 최근 스크랩 먼저, 비활성 정책은 목록에서 빠짐). 비활성 정책 처리 (검색·추천에서 빠짐, 상세 404, 채팅 기록 카드는 유지). 정책 검색·상세, 지역 목록 구현 (공개 API 2). 검색 쿼리 검증과 정렬(예정을 상시 앞에), 상세 `eligibility` 형식과 빈 칸 안내 문구(B7 변경), 지역 목록 응답과 시도 순서, 과도기 호환 `FINANCE`
+- v0.7 (2026-11-01): 추천 정책(프로필 + 대화 분야, 신청 가능 우선)·대화 요약 구현, `504 RAG_TIMEOUT`. 스크랩 구현 (목록 정렬은 정책 검색과 같게, 같은 날짜는 최근 스크랩 먼저, 비활성 정책은 목록에서 빠짐). 비활성 정책 처리 (검색·추천에서 빠짐, 상세 404, 채팅 기록 카드는 유지). 정책 검색·상세, 지역 목록 구현 (공개 API 2). 검색 쿼리 검증과 정렬(예정을 상시 앞에), 상세 `eligibility` 형식과 빈 칸 안내 문구(B7 변경), 지역 목록 응답과 시도 순서, 과도기 호환 `FINANCE`

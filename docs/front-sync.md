@@ -16,7 +16,9 @@
 | `GET /api/policies/{id}` | **됨** | 2-2절. `requiredDocuments`는 문자열 하나, 문자열에 줄바꿈 있음 |
 | `GET /api/regions` | **됨 (새 API)** | 2-2절. 시도 → 시군구 두 단계 선택용 |
 | `GET/POST /api/scraps`, `DELETE /api/scraps/{policyId}` | **됨** | 2-2절 |
-| 요약·추천, 가이드 PDF | 아직 | mock 유지 (`VITE_MOCK_FEATURES=summary,guides`) |
+| `GET /api/sessions/{id}/recommendations` | **됨** | 2-2절. 카드 목록 (채팅과 같은 형식) |
+| `POST /api/sessions/{id}/summary` | **됨** | 2-2절. 문장 한 덩어리 |
+| 가이드 PDF | 아직 | mock 유지 (`VITE_MOCK_FEATURES=guides`) |
 
 공통 규칙은 계약대로 동작함
 - `X-Client-Id`(UUID v4)가 없거나 형식이 틀리면 `400 INVALID_CLIENT_ID`. 대문자·하이픈 없는 형태도 같은 ID로 받음
@@ -95,6 +97,12 @@ curl -N -X POST <주소>/api/sessions/<id>/chat \
 - 검색·채팅 추천에서 빠짐. 상세는 `404 POLICY_NOT_FOUND`
 - 채팅 기록(`GET …/messages`)의 카드는 그대로 남음. 그 카드를 누르면 상세가 404이므로 "정책을 찾을 수 없음" 화면이 필요함
 
+**추천 정책·대화 요약** (계약 4.4)
+- 추천: 세션 프로필로 거른 뒤 최근 대화의 분야로 좁힌 정책 최대 10개, 신청 가능한 정책 먼저 (진행 중 → 상시 → 예정). 대화 전이면 프로필 기준만. LLM을 쓰지 않아 0.4초 정도. 비면 `[]` (지금 화면의 "지금 추천할 정책이 없어요."가 그대로 맞음)
+- 요약: 최근 10턴을 2~3문장으로. 보통 1~2초. 대화가 없으면 `"아직 나눈 대화가 없습니다."` (화면은 메시지가 없으면 버튼을 끄므로 거의 보이지 않음)
+- 요약은 채팅과 같은 요청 제한을 받아 `429`(`Retry-After`)가 올 수 있고, LLM 실패 `502 RAG_UPSTREAM_ERROR`, 시간 초과 `504 RAG_TIMEOUT` (JSON, `message`를 그대로 보여 주면 됨)
+- mock(`summary`)을 끄고 붙일 수 있음
+
 **스크랩**
 - 계약 v0.3 그대로 (`201`/`200` 멱등, 삭제는 늘 `204`). 카드는 채팅·검색과 같은 형식
 - 목록 정렬: 진행 중(마감 임박) → 예정(시작 임박) → 상시 → 기간 정보 없음 → 마감(최근 마감), 같은 날짜는 최근 스크랩 먼저. **스크랩 직후 화면에서 먼저 정렬하는 규칙(`features/scrap/api/queries.ts`, 진행 중 → 상시 → 마감)과 예정·정보 없음 위치가 다름** → 서버 목록을 다시 받으면 순서가 바뀔 수 있어 규칙을 맞추면 좋음
@@ -122,4 +130,4 @@ curl -N -X POST <주소>/api/sessions/<id>/chat \
 
 ## 4. 다음 (백엔드)
 - 서버 주소(R1): 인프라 담당자가 띄우면 이 문서에 추가 (배포 방법은 [deploy.md](deploy.md))
-- 공개 API 2: 요약·추천
+- 공개 API 2: 끝 (가이드 PDF는 나중)
