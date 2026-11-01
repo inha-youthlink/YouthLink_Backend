@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -68,7 +69,7 @@ class SearchPolicyRepository(FakePolicyRepository):
 
     async def get_detail(self, policy_no):
         self.detail_calls.append(policy_no)
-        return DETAIL if policy_no == "P-1" else None
+        return {"P-1": DETAIL, "P-GONE": replace(DETAIL, is_active=False)}.get(policy_no)
 
 
 @pytest.fixture
@@ -306,3 +307,11 @@ def test_policy_detail_requires_client_id(client):
 
     assert response.status_code == 400
     assert response.json()["code"] == "INVALID_CLIENT_ID"
+
+
+# 원천에서 사라진 정책은 예전 채팅 카드에서 들어와도 없는 정책과 같게
+def test_policy_detail_inactive_is_not_found(client):
+    response = client.get("/api/policies/P-GONE", headers=HEADERS)
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "POLICY_NOT_FOUND"

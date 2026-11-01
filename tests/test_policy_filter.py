@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import text
@@ -34,6 +34,8 @@ POLICIES = {
     }),
     "F-ALWAYS": (NATION, {"application_period_type_code": ALWAYS_OPEN_CODE}),
     "F-MARRIED": (NATION, {"marriage_status_code": "0055001"}),
+    # 원천에서 사라진 정책. 다른 조건이 모두 맞아도 항상 빠짐
+    "F-INACTIVE": (NATION, {"is_active": False, "deactivated_at": datetime(2026, 10, 20, tzinfo=UTC)}),
 }
 JOB_CODES = {"F-SEOUL": [UNEMPLOYED], "F-INCHEON": [EMPLOYED], "F-ALWAYS": [JOB_ANY], "F-MARRIED": [JOB_OTHER]}
 
@@ -84,7 +86,7 @@ async def _filter(repository, **conditions) -> set[str]:
     return {no for no in nos if no.startswith("F-")}
 
 
-ALL = set(POLICIES)
+ALL = set(POLICIES) - {"F-INACTIVE"}
 NATIONWIDE = {"F-NATION", "F-CLOSED", "F-UPCOMING", "F-ALWAYS", "F-MARRIED"}
 
 
@@ -143,3 +145,8 @@ async def test_list_regions(repository):
         ("11110", "11", "종로구"), ("11680", "11", "강남구"), ("28237", "28", "부평구"),
         ("41113", "41", "수원시 권선구"), ("41117", "41", "수원시 영통구"),
     }
+
+
+async def test_inactive_policy_always_excluded(repository):
+    assert "F-INACTIVE" not in await _filter(repository)
+    assert "F-INACTIVE" not in await _filter(repository, region_codes=("11680",), age=27)

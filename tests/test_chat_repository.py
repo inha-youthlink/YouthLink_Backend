@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import text
@@ -374,3 +374,26 @@ async def test_room_title_set_when_question_saved(chat_repository):
     await chat_repository.save_question(room_id, uuid.uuid4(), "질문1", "질문1 제목")
 
     assert (await chat_repository.get_room(room_id)).title == "질문1 제목"
+
+
+# 기록은 그때의 답이라 원천에서 사라진 정책도 카드·현재 정책에 그대로 남음 (본문의 번호와 어긋나지 않게)
+async def test_inactive_policy_kept_in_history(chat_repository, session_factory):
+    policy_no = TEST_POLICY_NOS[1]
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    answer_id = await _save_turn(
+        chat_repository, room_id, "질문",
+        policies=[_policy(TEST_POLICY_NOS[0], 0.9), _policy(policy_no, 0.5)],
+        current_policies=[_ref(TEST_POLICY_NOS[0]), _ref(policy_no)],
+    )
+    update = text("UPDATE policy SET is_active = :active, deactivated_at = :at WHERE policy_no = :no")
+    async with session_factory() as session, session.begin():
+        await session.execute(update, {"active": False, "at": datetime(2026, 10, 20, tzinfo=UTC), "no": policy_no})
+    try:
+        refs = await chat_repository.list_policy_refs([answer_id])
+        current = await chat_repository.list_current_policies(room_id)
+
+        assert [p.policy_no for p in refs[answer_id]] == [TEST_POLICY_NOS[0], policy_no]
+        assert [p.policy_no for p in current] == [TEST_POLICY_NOS[0], policy_no]
+    finally:
+        async with session_factory() as session, session.begin():
+            await session.execute(update, {"active": True, "at": None, "no": policy_no})

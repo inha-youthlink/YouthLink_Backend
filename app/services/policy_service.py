@@ -72,7 +72,8 @@ class PolicyService:
     async def get_detail(self, policy_id: str) -> PolicyDetail:
         # DB 컬럼(VARCHAR(30))보다 긴 ID는 있을 수 없어 조회하지 않음
         detail = await self._policy_repository.get_detail(policy_id) if len(policy_id) <= POLICY_ID_MAX_CHARS else None
-        if detail is None:
+        # 원천에서 사라진 정책은 오래된 정보라 보여 주지 않음. 예전 채팅 카드에서 들어와도 없는 정책과 같게 봄
+        if detail is None or not detail.is_active:
             raise PolicyNotFoundError
         labels = await self._policy_repository.get_region_labels([policy_id])
         summary = PolicySummary.from_item(detail.record.to_item(0.0, today_kst(), labels.get(policy_id)))
