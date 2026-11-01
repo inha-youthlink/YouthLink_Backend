@@ -15,6 +15,7 @@ from app.pipeline.retrieval.base import Retriever
 from app.repositories.chat_repository import ChatRepository
 from app.repositories.common_code_repository import CommonCodeRepository
 from app.repositories.policy_repository import PolicyRepository
+from app.repositories.scrap_repository import ScrapRepository
 
 
 # VectorRepository는 넣지 않음. 파이프라인은 검색기를 통해서만 검색함
@@ -45,6 +46,10 @@ def get_common_code_repository(request: Request) -> CommonCodeRepository:
 
 def get_chat_repository(request: Request) -> ChatRepository:
     return request.app.state.chat_repository
+
+
+def get_scrap_repository(request: Request) -> ScrapRepository:
+    return request.app.state.scrap_repository
 
 
 def get_pipeline_deps(

@@ -1,13 +1,15 @@
 from typing import Annotated
 
-from pydantic import BeforeValidator
+from pydantic import BeforeValidator, StringConstraints
 
-from app.schemas.public import PublicModel
+from app.schemas.public import KstDateTime, PublicModel
 from app.schemas.session import PolicyCategory, PolicySummary
 
 # 정책 검색 상한 (계약 4.4). 문장이 아니라 낱말로 찾는 검색이라 검색어를 짧게 둠
 KEYWORD_MAX_CHARS = 50
 PAGE_SIZE_MAX = 50
+# policy.policy_no 컬럼 길이
+POLICY_ID_MAX_CHARS = 30
 
 # 과도기 호환: v0.3 프론트의 FINANCE는 데이터에서 복지와 한 묶음이라 WELFARE로 받음. 프론트가 바뀌면 삭제
 LEGACY_SEARCH_CATEGORIES = {"FINANCE": PolicyCategory.WELFARE}
@@ -43,3 +45,14 @@ class PolicyDetail(PolicySummary):
     how_to_apply: str
     # 원문이 자유 문장이라 목록이 아니라 문자열 하나
     required_documents: str
+
+
+# 스크랩 (계약 §4.5, v0.3 그대로). 카드는 채팅·검색과 같은 PolicySummary
+class Scrap(PublicModel):
+    policy: PolicySummary
+    created_at: KstDateTime
+
+
+class ScrapRequest(PublicModel):
+    # policy.policy_no 컬럼 길이(VARCHAR(30)). 앞뒤 공백은 지움
+    policy_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=POLICY_ID_MAX_CHARS)]
