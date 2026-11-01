@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import text
@@ -63,12 +63,20 @@ TEXT_POLICIES = {
 }
 
 
+# 검색어·분류·지역이 모두 맞지만 원천에서 사라진 정책
+INACTIVE_POLICIES = {
+    "T-GONE": (SEOUL, {"policy_name": "청년 월세 지원 (종료)", "large_categories": ["주거"],
+                       "is_active": False, "deactivated_at": datetime(2026, 10, 20, tzinfo=UTC)}),
+}
+
+
 @pytest.fixture
 async def repository(session_factory):
     open_period = _period(date(2026, 10, 1), date(2026, 12, 31))
     rows = {
         **POLICIES,
         **{no: (codes, {**open_period, **columns}) for no, (codes, columns) in TEXT_POLICIES.items()},
+        **{no: (codes, {**open_period, **columns}) for no, (codes, columns) in INACTIVE_POLICIES.items()},
     }
     async with session_factory() as session, session.begin():
         await session.execute(
@@ -172,3 +180,13 @@ async def test_region_and_keyword_together(repository):
 
     # 인천 전용(T-JOB)만 빠짐
     assert set(nos) == {"T-RENT", "T-LOAN"}
+
+
+async def test_inactive_policy_excluded(repository):
+    nos, total = await _nos(repository, "T-", keywords=("월세",), large_categories=("주거",))
+
+    # 활성인 두 정책만 남음 (T-JOB은 설명에 월세, 대분류에 주거)
+    assert set(nos) == {"T-RENT", "T-JOB"}
+    assert total == 2
+    every, _ = await _nos(repository, "")
+    assert "T-GONE" not in every

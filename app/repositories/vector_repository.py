@@ -9,14 +9,16 @@ EMBEDDING_DIM = 1024
 
 # embedding IS NOT NULL: HNSW가 이 조건의 조건부 인덱스라 빠지면 인덱스를 쓰지 못함
 # ORDER BY: score로 정렬하면 인덱스를 쓰지 못해 거리로 정렬함
+# 비활성 정책: ETL이 원천에서 사라진 정책의 기존 벡터를 지우지 않고 남겨 두어 여기서 뺌
 _SEARCH_SQL = """
-SELECT chunk_id, policy_no, chunk_index, chunk_type, content,
-       1 - (embedding <=> :query_vec) AS score
-FROM policy_chunk
-WHERE embedding_model = :model
-  AND embedding IS NOT NULL
+SELECT c.chunk_id, c.policy_no, c.chunk_index, c.chunk_type, c.content,
+       1 - (c.embedding <=> :query_vec) AS score
+FROM policy_chunk c
+WHERE c.embedding_model = :model
+  AND c.embedding IS NOT NULL
+  AND EXISTS (SELECT 1 FROM policy p WHERE p.policy_no = c.policy_no AND p.is_active)
   {policy_filter}
-ORDER BY embedding <=> :query_vec
+ORDER BY c.embedding <=> :query_vec
 LIMIT :k
 """
 
@@ -39,7 +41,7 @@ class VectorRepository:
         params = {"query_vec": embedding, "model": embedding_model, "k": k}
         policy_filter = ""
         if policy_ids is not None:
-            policy_filter = "AND policy_no = ANY(:policy_ids)"
+            policy_filter = "AND c.policy_no = ANY(:policy_ids)"
             params["policy_ids"] = policy_ids
 
         stmt = text(_SEARCH_SQL.format(policy_filter=policy_filter)).bindparams(
@@ -47,8 +49,7 @@ class VectorRepository:
         )
 
         async with self._session_factory() as session, session.begin():
-            # 필터를 HNSW 탐색 뒤에 적용하면 k개보다 적게 나올 수 있어 반복 탐색으로 k개를 채움
-            if policy_ids is not None:
-                await session.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
+            # 조건(활성 정책, 정책 번호)을 HNSW 탐색 뒤에 적용하면 k개보다 적게 나올 수 있어 반복 탐색으로 k개를 채움
+            await session.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
             result = await session.execute(stmt, params)
             return [Chunk.model_validate(row) for row in result.mappings()]

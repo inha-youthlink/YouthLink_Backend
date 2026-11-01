@@ -1,4 +1,5 @@
 import hashlib
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text
@@ -94,8 +95,21 @@ async def test_get_detail(detail_repository):
     )
     assert (detail.min_age, detail.max_age, detail.income_condition_code, detail.max_income) == (19, 39, "0043002", 5000)
     assert detail.marriage_name == "미혼"
+    assert detail.is_active is True
     # 코드 순서대로, 제한없음도 그대로 (거르는 것은 서비스에서)
     assert detail.eligibility_names == {"JOB": ["미취업자", "프리랜서"], "MAJOR": ["제한없음"]}
+
+
+# 기본값이 활성이라 SQL이 is_active를 읽지 않아도 다른 테스트는 통과함. 비활성 정책으로 직접 확인함
+async def test_get_detail_reads_inactive(detail_repository, session_factory):
+    update = text("UPDATE policy SET is_active = :active, deactivated_at = :at WHERE policy_no = :no")
+    async with session_factory() as session, session.begin():
+        await session.execute(update, {"active": False, "at": datetime(2026, 10, 20, tzinfo=UTC), "no": DETAIL_NO})
+
+    detail = await detail_repository.get_detail(DETAIL_NO)
+
+    assert detail is not None
+    assert detail.is_active is False
 
 
 async def test_get_detail_unknown(detail_repository):

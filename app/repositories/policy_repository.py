@@ -49,7 +49,7 @@ SELECT {_RECORD_COLUMNS},
        p.description, p.support_content, p.application_method, p.submission_documents,
        p.additional_qualification, p.participation_exclusion, p.operating_org_name,
        p.min_age, p.max_age, p.income_condition_code, p.min_income, p.max_income, p.income_etc,
-       c.code_name AS marriage_name
+       c.code_name AS marriage_name, p.is_active
 FROM policy p
 LEFT JOIN common_code c ON c.code = p.marriage_status_code
 WHERE p.policy_no = :policy_no
@@ -178,6 +178,8 @@ class PolicyDetailRecord:
     marriage_name: str | None
     # condition_type(JOB, SCHOOL, MAJOR, SPECIAL) → 코드 이름
     eligibility_names: dict[str, list[str]] = field(default_factory=dict)
+    # 원천에서 사라진 정책은 ETL이 지우지 않고 비활성으로 남김. 보여 줄지는 서비스가 정함
+    is_active: bool = True
 
 
 _RECORD_FIELDS = frozenset(PolicyRecord.__dataclass_fields__)
@@ -295,8 +297,9 @@ def _build_filter_sql(policy_filter: PolicyFilter, today: date) -> tuple[str, di
 
 
 # 조건이 있는 것만 붙여 asyncpg가 타입을 알 수 없는 NULL 비교 파라미터를 피함
+# 비활성 정책(원천에서 사라짐)은 1차 필터(채팅, 앞으로 추천)와 정책 검색에서 항상 뺌
 def _filter_where(policy_filter: PolicyFilter, today: date) -> tuple[str, dict[str, Any]]:
-    clauses: list[str] = []
+    clauses: list[str] = ["p.is_active"]
     params: dict[str, Any] = {}
 
     # 시도 전체·전국 정책도 그 안의 시군구 코드를 모두 가져 코드 하나만 맞으면 남김
@@ -372,8 +375,7 @@ def _filter_where(policy_filter: PolicyFilter, today: date) -> tuple[str, dict[s
 )""")
         params[param] = f"%{_escape_like(word)}%"
 
-    where = "\nAND ".join(clauses) if clauses else "TRUE"
-    return where, params
+    return "\nAND ".join(clauses), params
 
 
 # 검색어의 %·_가 와일드카드로 읽혀 모든 정책이 걸리지 않게 글자 그대로 찾음
