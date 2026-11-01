@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.llm.client import ChatUsage, LLMClient, LLMStreamError
+from app.llm.client import BinaryEmbeddingError, ChatUsage, LLMClient, LLMStreamError
 
 
 class FakeStream:
@@ -92,3 +92,37 @@ async def test_stream_closed_when_consumer_stops():
     await pieces.aclose()
 
     assert responses.stream.closed
+
+
+class FakeEmbeddings:
+    def __init__(self, vector) -> None:
+        self.vector = vector
+        self.kwargs: dict = {}
+
+    async def create(self, **kwargs):
+        self.kwargs = kwargs
+        return SimpleNamespace(data=[SimpleNamespace(embedding=self.vector)])
+
+
+def _embed_client(vector) -> tuple[LLMClient, FakeEmbeddings]:
+    embeddings = FakeEmbeddings(vector)
+    openai = SimpleNamespace(embeddings=embeddings)
+    return LLMClient(openai, openai, "embed-model", "chat-model", "analysis-model"), embeddings
+
+
+# 빼면 SDK가 base64를 보내고 게이트웨이가 이진(0/1) 벡터를 돌려줌
+async def test_embed_asks_for_float_encoding():
+    client, embeddings = _embed_client([0.031, -0.0127, 0.5])
+
+    vector = await client.embed("질문")
+
+    assert vector == [0.031, -0.0127, 0.5]
+    assert embeddings.kwargs == {"model": "embed-model", "input": "질문", "encoding_format": "float"}
+
+
+@pytest.mark.parametrize("vector", [[1, 0, 0, 1], [0.0, 1.0, 1.0]])
+async def test_embed_rejects_binary_vector(vector):
+    client, _ = _embed_client(vector)
+
+    with pytest.raises(BinaryEmbeddingError):
+        await client.embed("질문")

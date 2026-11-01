@@ -34,6 +34,13 @@ class ParsedResult[T: BaseModel]:
     completion_tokens: int
 
 
+# 문서 임베딩(ETL)은 실수라 이진 질문 벡터로 검색하면 결과가 틀어짐. 조용히 검색하지 않고 실패시킴
+# 게이트웨이 쪽 문제라 다른 LLM 호출 실패와 같이 처리되게 OpenAIError로 둠 (/internal 503, 채팅 RAG_UPSTREAM_ERROR)
+class BinaryEmbeddingError(OpenAIError):
+    def __init__(self) -> None:
+        super().__init__("임베딩 API가 이진(0/1) 벡터를 돌려줌 (encoding_format=float 확인)")
+
+
 class LLMClient:
     def __init__(
         self,
@@ -67,12 +74,18 @@ class LLMClient:
             settings.analysis_model or settings.chat_model,
         )
 
+    # encoding_format을 빼면 SDK가 "base64"를 보내고 게이트웨이가 Titan 이진 출력(0/1)으로 바꿈
+    # 이진 벡터는 크기 정보가 사라져 검색 점수가 좁은 범위에 몰리므로 실수로 요청하고, 그래도 오면 멈춤
     async def embed(self, text: str) -> list[float]:
         response = await self._client.embeddings.create(
             model=self.embedding_model,
             input=text,
+            encoding_format="float",
         )
-        return response.data[0].embedding
+        vector = response.data[0].embedding
+        if vector and all(value in (0, 1) for value in vector):
+            raise BinaryEmbeddingError
+        return vector
 
     async def chat(self, messages: list[dict[str, str]]) -> ChatResult:
         response = await self._client.responses.create(
