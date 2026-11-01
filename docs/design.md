@@ -24,7 +24,7 @@
 ### 1-1. ETL과의 데이터 계약
 
 **확정** (ETL `db/schema.sql`, `db/migrations/` 기준)
-- **임베딩 모델과 차원**: `bedrock-titan-embed-v2`, 1024차원. 질문도 같은 모델로 임베딩 (`policy_chunk.embedding_model`로 확인)
+- **임베딩 모델과 차원**: `bedrock-titan-embed-v2`, 1024차원. 질문도 같은 모델로 임베딩 (`policy_chunk.embedding_model`로 확인). **요청에 `encoding_format="float"` 필수**: 빼면 OpenAI SDK가 `base64`를 보내고 게이트웨이가 Titan 이진 출력(0/1)으로 바꿈. 이진이면 검색 점수가 좁게 몰려(같은 질문 `/internal` 기준 상위 30개 차이 0.047 → 실수 0.100) 재정렬 감점·가산점이 관련도를 덮음. ETL과 백엔드 모두 0/1 벡터를 받으면 멈춤 (11-01 수정)
 - **거리 기준**: 코사인 → pgvector `<=>` 연산자, 점수는 `1 - 거리`
 - **벡터 인덱스**: HNSW (`vector_cosine_ops`), `WHERE embedding IS NOT NULL` 조건부 인덱스 → 검색 쿼리에도 `embedding IS NOT NULL` 조건 필요
 
@@ -220,7 +220,7 @@ YouthLink_Backend/
 | 용도 | 모델 | 설정 키 |
 |---|---|---|
 | 접속 | Bedrock 게이트웨이 (OpenAI 호환, Responses API·구조화 출력 지원 확인) | `OPENAI_BASE_URL` |
-| 임베딩 | `bedrock-titan-embed-v2`, 1024차원 (ETL과 반드시 동일) | `EMBEDDING_MODEL` |
+| 임베딩 | `bedrock-titan-embed-v2`, 1024차원, 실수(`encoding_format="float"`) (ETL과 반드시 동일) | `EMBEDDING_MODEL` |
 | 답변 생성 | `bedrock-gpt-5.6-luna` | `CHAT_MODEL` |
 
 ### 3-4. 구현 포인트
