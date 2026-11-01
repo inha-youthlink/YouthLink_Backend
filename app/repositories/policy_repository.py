@@ -48,6 +48,11 @@ STATUS_ORDER_SQL = """status_group,
 _SEARCH_ORDER_SQL = f"""{STATUS_ORDER_SQL},
     policy_no DESC"""
 
+# 추천(계약 "신청 가능한 정책 우선"): 지금 신청할 수 있는 상시를 예정보다 앞에 둠 (진행 중 → 상시 → 예정 → 정보 없음 → 마감)
+# 검색은 곧 신청할 정책을 놓치지 않게 예정을 앞에 둠. 그룹 안 순서는 같음
+_AVAILABLE_FIRST_ORDER_SQL = f"""CASE status_group WHEN 2 THEN 1 WHEN 1 THEN 2 ELSE status_group END,
+    {_SEARCH_ORDER_SQL}"""
+
 _GET_DETAIL_SQL = text(f"""
 SELECT {RECORD_COLUMNS},
        p.description, p.support_content, p.application_method, p.submission_documents,
@@ -229,7 +234,7 @@ class PolicyRepository:
 
     # 전체 개수는 요청한 페이지가 범위를 넘어 비어 있어도 알려야 해서 따로 셈
     async def search(
-        self, policy_filter: PolicyFilter, today: date, offset: int, limit: int
+        self, policy_filter: PolicyFilter, today: date, offset: int, limit: int, *, available_first: bool = False
     ) -> tuple[list[PolicyRecord], int]:
         where, params = _filter_where(policy_filter, today)
         params.update(
@@ -242,7 +247,7 @@ SELECT * FROM (
     FROM policy p
     WHERE {where}
 ) matched
-ORDER BY {_SEARCH_ORDER_SQL}
+ORDER BY {_AVAILABLE_FIRST_ORDER_SQL if available_first else _SEARCH_ORDER_SQL}
 OFFSET :offset LIMIT :limit
 """)
         async with self._session_factory() as session:
