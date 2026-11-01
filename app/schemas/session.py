@@ -195,3 +195,8 @@ class ChatRequest(PublicModel):
     client_message_id: UUID
     # 공백만 있는 질문은 LLM을 불러도 답할 수 없어 앞뒤 공백을 지운 뒤 길이를 봄. 저장·재시도 비교도 지운 값으로 함
     content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=QUESTION_MAX_CHARS)]
+
+
+# 대화 요약 (계약 4.2). 저장하지 않고 요청마다 만듦
+class SummaryResult(PublicModel):
+    summary: str

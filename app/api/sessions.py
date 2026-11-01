@@ -26,6 +26,7 @@ from app.schemas.session import (
     CreateSessionRequest,
     Message,
     PolicySummary,
+    SummaryResult,
 )
 from app.services.assist_service import AssistService
 from app.services.chat_service import ChatService
@@ -94,6 +95,26 @@ async def get_session(session_id: SessionId, client_id: ClientId, service: Servi
 @router.get("/{session_id}/messages", responses=_NOT_FOUND)
 async def list_messages(session_id: SessionId, client_id: ClientId, service: Service) -> list[Message]:
     return await service.list_messages(session_id, client_id)
+
+
+# 계약 R8: LLM을 부르므로 채팅과 같은 요청 제한과 하루 상한을 씀
+@router.post(
+    "/{session_id}/summary",
+    responses={
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+        status.HTTP_504_GATEWAY_TIMEOUT: {"model": ErrorResponse},
+        **_NOT_FOUND,
+    },
+    dependencies=[Depends(limit_chat_requests)],
+)
+async def create_summary(
+    session_id: SessionId,
+    client_id: ClientId,
+    assist: Assist,
+    limits: Annotated[RateLimits, Depends(get_rate_limits)],
+) -> SummaryResult:
+    return SummaryResult(summary=await assist.summarize(session_id, client_id, limits))
 
 
 # 최대 10개, 신청 가능한 정책 우선 (계약 4.2, B3). LLM을 부르지 않아 채팅 요청 제한은 걸지 않음
