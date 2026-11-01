@@ -120,7 +120,7 @@ YouthLink_Backend/
 │  │  ├─ sessions.py             # 공개 API: 세션 4개 + 채팅 SSE (6주차 rooms.py를 대체)
 │  │  ├─ policies.py             # 공개 API: 정책 검색·상세 (공개 API 2)
 │  │  ├─ regions.py              # 공개 API: 지역 목록 (공개 API 2)
-│  │  └─ scraps.py               [+ 공개 API 2] 스크랩
+│  │  └─ scraps.py               # 공개 API: 스크랩 3개 (공개 API 2)
 │  ├─ schemas/
 │  │  ├─ pipeline.py             # Profile, PipelineInput/Output, Chunk, PolicyItem, PUBLIC_TRACE_KEYS
 │  │  ├─ analysis.py             [+ 7주차] LLM 구조화 출력
@@ -163,12 +163,14 @@ YouthLink_Backend/
 │  │  ├─ chat_service.py         # 소유 확인 → 파이프라인 → 한 트랜잭션 저장, 세션 응답 변환
 │  │  ├─ policy_service.py       # 정책 검색(1차 필터 조건 재사용)·상세, 지역 목록
 │  │  ├─ policy_detail.py        # 상세의 자격 문장 조립, 빈 칸 안내 문구
+│  │  ├─ scrap_service.py        # 스크랩 추가(새로 만들었는지)·목록·삭제, 카드 변환
 │  │  └─ chat_skeleton.py        # 채팅 SSE 뼈대 (RAG 없이 고정 문장, 본구현에서 대체)
 │  ├─ repositories/
 │  │  ├─ vector_repository.py    # policy_chunk 벡터 검색 (읽기)
 │  │  ├─ policy_repository.py    # policy 조회·1차 필터·정책 검색·상세 (읽기)
 │  │  ├─ common_code_repository.py  # common_code 코드 → 이름 조회 (읽기)
-│  │  └─ chat_repository.py      # 채팅 테이블 읽기·쓰기 (SQLAlchemy Core, ORM 모델 없음)
+│  │  ├─ chat_repository.py      # 채팅 테이블 읽기·쓰기 (SQLAlchemy Core, ORM 모델 없음)
+│  │  └─ scrap_repository.py     # policy_scrap 읽기·쓰기 (정책은 조인·활성 확인만)
 │  └─ prompts/
 │     ├─ analyze_v5.md           # 질문 분석 (넓은 주제는 검색어 확장, 분야)
 │     ├─ answer_common_v1.md     # 답변 공통 조각 (근거 사용, 신청 상태, 말투)
@@ -278,6 +280,7 @@ POST /internal/pipeline   PipelineInput → PipelineOutput (저장 없음)
 - 파이프라인 스트리밍 (1-2): `stream_pipeline()`이 카드 → 본문 조각 → `PipelineOutput` 순서로 내보냄 (B9). 답변 첫 줄 `[소개: …]`를 받는 즉시 카드를 정하고, 40자가 넘도록 줄바꿈이 없으면 카드 줄이 아니라고 봄. `/internal`의 `run_pipeline()`은 같은 스트림을 모아 한 번에 돌려줘 결과·trace가 같음. trace `latency_ms.first_token` 추가 (질문을 받고 첫 본문 조각까지)
 - 채팅 연결 (1-2): `/chat`이 `stream_pipeline()`을 SSE로 보냄 (`policies`는 카드가 있을 때만). 질문은 스트림 전에 저장, 답변·카드·현재 정책은 `done` 직전에 한 트랜잭션. `clientMessageId` 멱등 처리(계약 §5.3, 다시 보내기도 B9 순서), 세션 단위 메모리 잠금(`409 STREAM_IN_PROGRESS`, 해제 못 한 잠금은 5분 뒤 만료). 연결이 끊기면 각 층의 스트림을 `aclosing`으로 바로 닫아 LLM 스트림까지 멈춤. 스트림 중 실패는 `error` 이벤트(`RAG_TIMEOUT`/`RAG_UPSTREAM_ERROR`/`INTERNAL_ERROR`). 하루 LLM 상한은 실제 생성 때만 셈. 뼈대는 `CHAT_SKELETON_ENABLED=true`일 때만 (R2 확인 뒤 삭제)
 - 정책 검색·상세, 지역 목록 (공개 API 2, 계약 v0.7 4.4): 검색은 1차 필터의 WHERE 조립(`_filter_where`)에 분류·검색어 조건을 더하고, 정렬(진행 중 → 예정 → 상시 → 정보 없음 → 마감)과 페이지는 SQL에서 함. 정렬 그룹 판단은 `application_status()`와 같은 순서. 지역은 프로필과 같은 `RegionIndex`로 검증·범위 변환하고, 지역 목록도 같은 단위(구가 있는 시는 시 코드)로 만들어 목록의 코드가 모두 프로필·검색에 쓰임. 상세 `eligibility`는 1차 필터와 같은 값(나이·소득 상한·코드)으로 조립하고, 빈 칸은 확인할 곳 안내 문구. 사용자별 응답이 아니라 `Cache-Control`은 붙이지 않음
+- 스크랩 (공개 API 2): `policy_scrap`은 `scrap_repository`만 씀. 추가는 `INSERT … ON CONFLICT DO NOTHING RETURNING` 한 번으로 새로 만들었는지 판단(동시에 눌러도 한 건). 목록은 정책 검색의 신청 상태 순서(`STATUS_ORDER_SQL`)를 같이 쓰고 같은 날짜는 최근 스크랩 먼저. 비활성 정책은 목록에서 빼되 행은 남김(다시 활성이 되면 돌아옴)
 - 비활성 정책 (ETL 008, 원천에서 사라지면 `policy.is_active = false`로 남김): 1차 필터 WHERE(`_filter_where`)와 벡터 검색에서 항상 뺌 (ETL이 기존 벡터를 지우지 않아 벡터 검색도 따로 거름. 활성 조건 때문에 HNSW 반복 탐색을 항상 켬). 정책 상세 API는 404. 채팅 기록 카드와 현재 정책(지목 대상)은 그대로 둠: 카드를 빼면 답변 본문의 번호와, 현재 정책을 빼면 "첫 번째 정책" 같은 지목이 어긋남
 
 ---
