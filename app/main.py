@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.api import health, internal, policies, regions, sessions
+from app.api import health, internal, policies, regions, scraps, sessions
 from app.core.config import get_settings
 from app.core.dependencies import limit_public_requests, verify_origin
 from app.core.errors import register_error_handlers
@@ -14,6 +14,7 @@ from app.pipeline.retrieval.factory import create_retriever
 from app.repositories.chat_repository import ChatRepository
 from app.repositories.common_code_repository import CommonCodeRepository
 from app.repositories.policy_repository import PolicyRepository
+from app.repositories.scrap_repository import ScrapRepository
 from app.repositories.vector_repository import VectorRepository
 
 
@@ -32,6 +33,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.policy_repository = PolicyRepository(app.state.session_factory)
     app.state.common_code_repository = CommonCodeRepository(app.state.session_factory)
     app.state.chat_repository = ChatRepository(app.state.session_factory)
+    app.state.scrap_repository = ScrapRepository(app.state.session_factory)
     app.state.retriever = create_retriever(
         settings.retriever,
         app.state.llm,
@@ -68,3 +70,4 @@ PUBLIC_DEPENDENCIES = [Depends(verify_origin), Depends(limit_public_requests)]
 app.include_router(sessions.router, dependencies=PUBLIC_DEPENDENCIES)
 app.include_router(policies.router, dependencies=PUBLIC_DEPENDENCIES)
 app.include_router(regions.router, dependencies=PUBLIC_DEPENDENCIES)
+app.include_router(scraps.router, dependencies=PUBLIC_DEPENDENCIES)

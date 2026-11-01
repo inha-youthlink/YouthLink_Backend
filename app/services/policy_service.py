@@ -3,7 +3,7 @@ import math
 from app.core.errors import PolicyNotFoundError
 from app.pipeline.conditions import RegionIndex
 from app.repositories.policy_repository import PolicyFilter, PolicyRepository
-from app.schemas.policy import PolicyDetail, RegionOption, SidoRegions
+from app.schemas.policy import POLICY_ID_MAX_CHARS, PolicyDetail, RegionOption, SidoRegions
 from app.schemas.policy_info import CATEGORY_NAMES, today_kst
 from app.schemas.public import Page
 from app.schemas.session import POLICY_CATEGORIES, PolicyCategory, PolicySummary
@@ -11,9 +11,6 @@ from app.services.policy_detail import clean_text, eligibility_text, missing_tex
 from app.services.profile_codes import region_code
 
 _CATEGORY_BY_POLICY_CATEGORY = {policy_category: category for category, policy_category in POLICY_CATEGORIES.items()}
-
-# policy.policy_no 컬럼 길이
-POLICY_ID_MAX_CHARS = 30
 
 # 시도 코드 순서는 새 코드(전남광주 12, 강원 51, 전북 52) 때문에 화면 순서로 쓸 수 없어 따로 정함
 # 수도권 먼저, 그 뒤는 행정 표준 순서. 전남광주는 통합특별시라 옛 광주광역시 자리. 목록에 없는 시도는 맨 뒤에 코드 순

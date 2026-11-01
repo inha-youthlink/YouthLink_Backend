@@ -15,18 +15,19 @@ OTHER_INCOME_CODE = "0043003"
 # 정책 소득 상한은 만 원 단위인데 원 단위로 들어간 값이 섞여 있어(예: 43,056,240) 이 이상은 판정하지 않음
 MAX_INCOME_MANWON = 100_000
 
-_RECORD_COLUMNS = """p.policy_no, p.policy_name,
+# 카드(PolicyRecord)에 필요한 컬럼. 정책 테이블 별칭은 p
+RECORD_COLUMNS = """p.policy_no, p.policy_name,
        p.application_period_type_code, p.application_start_date, p.application_end_date,
        p.application_url, p.reference_url_1, p.reference_url_2, p.supervising_org_name, p.large_categories"""
 
 _GET_BY_IDS_SQL = text(f"""
-SELECT {_RECORD_COLUMNS}
+SELECT {RECORD_COLUMNS}
 FROM policy p
 WHERE p.policy_no = ANY(:policy_nos)
 """)
 
 # 신청 상태 순서: 진행 중 → 예정 → 상시 → 기간 정보 없음 → 마감. 판단 순서는 application_status()와 같음
-_STATUS_GROUP_SQL = """CASE
+STATUS_GROUP_SQL = """CASE
         WHEN p.application_period_type_code = :always_open_code THEN 2
         WHEN p.application_period_type_code = :closed_code THEN 4
         WHEN p.application_start_date IS NULL AND p.application_end_date IS NULL THEN 3
@@ -35,17 +36,20 @@ _STATUS_GROUP_SQL = """CASE
         ELSE 0
     END"""
 
-# 진행 중은 마감 임박, 예정은 시작 임박, 마감은 최근 마감 순
-# 상시·정보 없음 그룹과, 날짜가 같은 정책은 최신 정책 먼저 (정책 번호가 등록일로 시작함)
-# 페이지가 바뀌어도 순서가 흔들리지 않게 마지막에 정책 번호로 정함
-_SEARCH_ORDER_SQL = """status_group,
+# 진행 중은 마감 임박, 예정은 시작 임박, 마감은 최근 마감 순. 정책 검색과 스크랩 목록이 함께 씀
+# 그 뒤 순서(같은 그룹·같은 날짜)는 쓰는 곳마다 붙임
+STATUS_ORDER_SQL = """status_group,
     CASE WHEN status_group = 0 THEN application_end_date END ASC NULLS LAST,
     CASE WHEN status_group = 1 THEN application_start_date END ASC,
-    CASE WHEN status_group = 4 THEN application_end_date END DESC NULLS LAST,
+    CASE WHEN status_group = 4 THEN application_end_date END DESC NULLS LAST"""
+
+# 상시·정보 없음 그룹과, 날짜가 같은 정책은 최신 정책 먼저 (정책 번호가 등록일로 시작함)
+# 페이지가 바뀌어도 순서가 흔들리지 않게 마지막에 정책 번호로 정함
+_SEARCH_ORDER_SQL = f"""{STATUS_ORDER_SQL},
     policy_no DESC"""
 
 _GET_DETAIL_SQL = text(f"""
-SELECT {_RECORD_COLUMNS},
+SELECT {RECORD_COLUMNS},
        p.description, p.support_content, p.application_method, p.submission_documents,
        p.additional_qualification, p.participation_exclusion, p.operating_org_name,
        p.min_age, p.max_age, p.income_condition_code, p.min_income, p.max_income, p.income_etc,
@@ -182,7 +186,7 @@ class PolicyDetailRecord:
     is_active: bool = True
 
 
-_RECORD_FIELDS = frozenset(PolicyRecord.__dataclass_fields__)
+RECORD_FIELDS = frozenset(PolicyRecord.__dataclass_fields__)
 
 
 class PolicyRepository:
@@ -218,9 +222,9 @@ class PolicyRepository:
             for code in (await session.execute(_GET_ELIGIBILITY_NAMES_SQL, {"policy_no": policy_no})).mappings():
                 names.setdefault(code["condition_type"], []).append(code["code_name"])
         return PolicyDetailRecord(
-            record=PolicyRecord(**{key: value for key, value in row.items() if key in _RECORD_FIELDS}),
+            record=PolicyRecord(**{key: value for key, value in row.items() if key in RECORD_FIELDS}),
             eligibility_names=names,
-            **{key: value for key, value in row.items() if key not in _RECORD_FIELDS},
+            **{key: value for key, value in row.items() if key not in RECORD_FIELDS},
         )
 
     # 전체 개수는 요청한 페이지가 범위를 넘어 비어 있어도 알려야 해서 따로 셈
@@ -234,7 +238,7 @@ class PolicyRepository:
         count_sql = text(f"SELECT count(*) FROM policy p WHERE {where}")
         page_sql = text(f"""
 SELECT * FROM (
-    SELECT {_RECORD_COLUMNS}, {_STATUS_GROUP_SQL} AS status_group
+    SELECT {RECORD_COLUMNS}, {STATUS_GROUP_SQL} AS status_group
     FROM policy p
     WHERE {where}
 ) matched
@@ -245,7 +249,7 @@ OFFSET :offset LIMIT :limit
             total = (await session.execute(count_sql, params)).scalar_one()
             result = await session.execute(page_sql, params)
             records = [
-                PolicyRecord(**{key: value for key, value in row.items() if key in _RECORD_FIELDS})
+                PolicyRecord(**{key: value for key, value in row.items() if key in RECORD_FIELDS})
                 for row in result.mappings()
             ]
         return records, total

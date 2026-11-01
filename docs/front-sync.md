@@ -15,7 +15,8 @@
 | `GET /api/policies` | **됨** | 2-2절. 페이지 응답 `{items, page, size, totalElements, totalPages}`, 항목은 채팅 카드와 같은 형식 |
 | `GET /api/policies/{id}` | **됨** | 2-2절. `requiredDocuments`는 문자열 하나, 문자열에 줄바꿈 있음 |
 | `GET /api/regions` | **됨 (새 API)** | 2-2절. 시도 → 시군구 두 단계 선택용 |
-| 요약·추천, 스크랩, 가이드 PDF | 아직 | mock 유지 (`VITE_MOCK_FEATURES=summary,guides,scraps`) |
+| `GET/POST /api/scraps`, `DELETE /api/scraps/{policyId}` | **됨** | 2-2절 |
+| 요약·추천, 가이드 PDF | 아직 | mock 유지 (`VITE_MOCK_FEATURES=summary,guides`) |
 
 공통 규칙은 계약대로 동작함
 - `X-Client-Id`(UUID v4)가 없거나 형식이 틀리면 `400 INVALID_CLIENT_ID`. 대문자·하이픈 없는 형태도 같은 ID로 받음
@@ -94,6 +95,12 @@ curl -N -X POST <주소>/api/sessions/<id>/chat \
 - 검색·채팅 추천에서 빠짐. 상세는 `404 POLICY_NOT_FOUND`
 - 채팅 기록(`GET …/messages`)의 카드는 그대로 남음. 그 카드를 누르면 상세가 404이므로 "정책을 찾을 수 없음" 화면이 필요함
 
+**스크랩**
+- 계약 v0.3 그대로 (`201`/`200` 멱등, 삭제는 늘 `204`). 카드는 채팅·검색과 같은 형식
+- 목록 정렬: 진행 중(마감 임박) → 예정(시작 임박) → 상시 → 기간 정보 없음 → 마감(최근 마감), 같은 날짜는 최근 스크랩 먼저. **스크랩 직후 화면에서 먼저 정렬하는 규칙(`features/scrap/api/queries.ts`, 진행 중 → 상시 → 마감)과 예정·정보 없음 위치가 다름** → 서버 목록을 다시 받으면 순서가 바뀔 수 있어 규칙을 맞추면 좋음
+- 원천에서 사라진 정책은 목록에서 빠짐 (다시 활성이 되면 돌아옴). 그 정책을 다시 스크랩하면 `404 POLICY_NOT_FOUND`
+- mock(`scraps`)은 끄고 붙일 수 있음. 지금 mock은 정책을 v0.3 형식(`category`·`region` 필수)으로 검사함
+
 **지역 목록 `GET /api/regions`**
 - `[{code, name, sigungu: [{code, name}]}]`. 시도를 고르면 그 시도의 `sigungu`를 보여 주고, 첫 항목은 "○○ 전체"(`○○000`)
 - 시도 순서는 서버가 정함 (서울 → 경기 → 인천 → 행정 표준 순서). 받은 순서대로 그리면 됨
@@ -115,4 +122,4 @@ curl -N -X POST <주소>/api/sessions/<id>/chat \
 
 ## 4. 다음 (백엔드)
 - 서버 주소(R1): 인프라 담당자가 띄우면 이 문서에 추가 (배포 방법은 [deploy.md](deploy.md))
-- 공개 API 2: 스크랩, 요약·추천
+- 공개 API 2: 요약·추천
