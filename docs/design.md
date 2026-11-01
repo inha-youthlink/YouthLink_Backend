@@ -164,6 +164,7 @@ YouthLink_Backend/
 │  │  ├─ policy_service.py       # 정책 검색(1차 필터 조건 재사용)·상세, 지역 목록
 │  │  ├─ policy_detail.py        # 상세의 자격 문장 조립, 빈 칸 안내 문구
 │  │  ├─ scrap_service.py        # 스크랩 추가(새로 만들었는지)·목록·삭제, 카드 변환
+│  │  ├─ assist_service.py       # 대화 보조: 추천 정책(프로필 + 대화 분야), 대화 요약(LLM)
 │  │  └─ chat_skeleton.py        # 채팅 SSE 뼈대 (RAG 없이 고정 문장, 본구현에서 대체)
 │  ├─ repositories/
 │  │  ├─ vector_repository.py    # policy_chunk 벡터 검색 (읽기)
@@ -177,7 +178,8 @@ YouthLink_Backend/
 │     ├─ answer_cards_v1.md      # 카드를 LLM이 고를 때 첫 줄 형식
 │     ├─ answer_recommend_v1.md  # 추천(목록) 조각
 │     ├─ answer_detail_v1.md     # 상세 조각 (신청 방법 안내)
-│     └─ answer_short_v1.md      # 짧은 답변 (단독)
+│     ├─ answer_short_v1.md      # 짧은 답변 (단독)
+│     └─ summary_v1.md           # 대화 요약 (공개 API, 2~3문장)
 ├─ .github/                      # 이슈·PR 템플릿
 ├─ docs/
 │  ├─ design.md                  # 설계 문서 (항상 최신)
@@ -280,6 +282,7 @@ POST /internal/pipeline   PipelineInput → PipelineOutput (저장 없음)
 - 파이프라인 스트리밍 (1-2): `stream_pipeline()`이 카드 → 본문 조각 → `PipelineOutput` 순서로 내보냄 (B9). 답변 첫 줄 `[소개: …]`를 받는 즉시 카드를 정하고, 40자가 넘도록 줄바꿈이 없으면 카드 줄이 아니라고 봄. `/internal`의 `run_pipeline()`은 같은 스트림을 모아 한 번에 돌려줘 결과·trace가 같음. trace `latency_ms.first_token` 추가 (질문을 받고 첫 본문 조각까지)
 - 채팅 연결 (1-2): `/chat`이 `stream_pipeline()`을 SSE로 보냄 (`policies`는 카드가 있을 때만). 질문은 스트림 전에 저장, 답변·카드·현재 정책은 `done` 직전에 한 트랜잭션. `clientMessageId` 멱등 처리(계약 §5.3, 다시 보내기도 B9 순서), 세션 단위 메모리 잠금(`409 STREAM_IN_PROGRESS`, 해제 못 한 잠금은 5분 뒤 만료). 연결이 끊기면 각 층의 스트림을 `aclosing`으로 바로 닫아 LLM 스트림까지 멈춤. 스트림 중 실패는 `error` 이벤트(`RAG_TIMEOUT`/`RAG_UPSTREAM_ERROR`/`INTERNAL_ERROR`). 하루 LLM 상한은 실제 생성 때만 셈. 뼈대는 `CHAT_SKELETON_ENABLED=true`일 때만 (R2 확인 뒤 삭제)
 - 정책 검색·상세, 지역 목록 (공개 API 2, 계약 v0.7 4.4): 검색은 1차 필터의 WHERE 조립(`_filter_where`)에 분류·검색어 조건을 더하고, 정렬(진행 중 → 예정 → 상시 → 정보 없음 → 마감)과 페이지는 SQL에서 함. 정렬 그룹 판단은 `application_status()`와 같은 순서. 지역은 프로필과 같은 `RegionIndex`로 검증·범위 변환하고, 지역 목록도 같은 단위(구가 있는 시는 시 코드)로 만들어 목록의 코드가 모두 프로필·검색에 쓰임. 상세 `eligibility`는 1차 필터와 같은 값(나이·소득 상한·코드)으로 조립하고, 빈 칸은 확인할 곳 안내 문구. 사용자별 응답이 아니라 `Cache-Control`은 붙이지 않음
+- 추천·대화 요약 (공개 API 2, `assist_service.py`): 추천은 채팅 검색과 같은 프로필 조건(`build_conditions`)에 최근 답변 분석의 분야(빈도, 동률이면 최근)를 더해 정책 검색 SQL로 10개 (`available_first`: 진행 중 → 상시 → 예정). 요약은 최근 10턴(답변은 앞 1000자, 카드는 정책 이름)과 프로필 조건 문구로 `summary_v1` 한 번 호출. 출력 상한 1,000토큰, 추론 `low`(`minimal`은 게이트웨이 미지원), 재시도 없음(시간 제한 30초를 여러 번 기다리지 않게). 저장하지 않음. 요청 제한은 채팅과 같고 대화가 없으면 LLM을 부르지 않음
 - 스크랩 (공개 API 2): `policy_scrap`은 `scrap_repository`만 씀. 추가는 `INSERT … ON CONFLICT DO NOTHING RETURNING` 한 번으로 새로 만들었는지 판단(동시에 눌러도 한 건). 목록은 정책 검색의 신청 상태 순서(`STATUS_ORDER_SQL`)를 같이 쓰고 같은 날짜는 최근 스크랩 먼저. 비활성 정책은 목록에서 빼되 행은 남김(다시 활성이 되면 돌아옴)
 - 비활성 정책 (ETL 008, 원천에서 사라지면 `policy.is_active = false`로 남김): 1차 필터 WHERE(`_filter_where`)와 벡터 검색에서 항상 뺌 (ETL이 기존 벡터를 지우지 않아 벡터 검색도 따로 거름. 활성 조건 때문에 HNSW 반복 탐색을 항상 켬). 정책 상세 API는 404. 채팅 기록 카드와 현재 정책(지목 대상)은 그대로 둠: 카드를 빼면 답변 본문의 번호와, 현재 정책을 빼면 "첫 번째 정책" 같은 지목이 어긋남
 

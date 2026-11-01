@@ -1,5 +1,6 @@
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from typing import Any
 
 from openai import AsyncOpenAI, OpenAIError
 from pydantic import BaseModel
@@ -87,10 +88,25 @@ class LLMClient:
             raise BinaryEmbeddingError
         return vector
 
-    async def chat(self, messages: list[dict[str, str]]) -> ChatResult:
-        response = await self._client.responses.create(
+    # 대화 요약처럼 짧은 답에는 출력 상한과 낮은 추론을 줘 기다림을 줄임. 주지 않으면 모델 기본값
+    async def chat(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        max_output_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+        max_retries: int | None = None,
+    ) -> ChatResult:
+        client = self._client if max_retries is None else self._client.with_options(max_retries=max_retries)
+        options: dict[str, Any] = {}
+        if max_output_tokens is not None:
+            options["max_output_tokens"] = max_output_tokens
+        if reasoning_effort is not None:
+            options["reasoning"] = {"effort": reasoning_effort}
+        response = await client.responses.create(
             model=self.chat_model,
             input=messages,
+            **options,
         )
         usage = response.usage
         # Responses API의 input/output 토큰을 trace 형식(prompt/completion)에 맞춤

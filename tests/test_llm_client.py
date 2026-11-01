@@ -126,3 +126,45 @@ async def test_embed_rejects_binary_vector(vector):
 
     with pytest.raises(BinaryEmbeddingError):
         await client.embed("질문")
+
+
+class FakeChatResponses:
+    def __init__(self) -> None:
+        self.kwargs: dict = {}
+
+    async def create(self, **kwargs):
+        self.kwargs = kwargs
+        return SimpleNamespace(output_text="요약", usage=SimpleNamespace(input_tokens=12, output_tokens=3))
+
+
+class FakeOpenAI:
+    def __init__(self) -> None:
+        self.responses = FakeChatResponses()
+        self.options: list[dict] = []
+
+    def with_options(self, **options):
+        self.options.append(options)
+        return self
+
+
+async def test_chat_without_options_uses_model_defaults():
+    openai = FakeOpenAI()
+    client = LLMClient(openai, openai, "embed", "chat-model", "analysis-model")
+
+    result = await client.chat([{"role": "user", "content": "q"}])
+
+    assert (result.text, result.prompt_tokens, result.completion_tokens) == ("요약", 12, 3)
+    assert openai.responses.kwargs == {"model": "chat-model", "input": [{"role": "user", "content": "q"}]}
+    assert openai.options == []
+
+
+# 대화 요약: 출력 상한, 낮은 추론, 재시도 없음
+async def test_chat_passes_short_answer_options():
+    openai = FakeOpenAI()
+    client = LLMClient(openai, openai, "embed", "chat-model", "analysis-model")
+
+    await client.chat([], max_output_tokens=1000, reasoning_effort="low", max_retries=0)
+
+    assert openai.responses.kwargs["max_output_tokens"] == 1000
+    assert openai.responses.kwargs["reasoning"] == {"effort": "low"}
+    assert openai.options == [{"max_retries": 0}]

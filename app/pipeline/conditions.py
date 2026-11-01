@@ -270,15 +270,18 @@ async def load_regions(ctx: PipelineContext) -> RegionIndex:
 
 async def load_code_names(ctx: PipelineContext) -> dict[str, str]:
     if ctx.code_names is None:
-        profile = ctx.input.profile
-        codes = [
-            code for code in (
-                profile.job_code, profile.school_code, profile.major_code,
-                profile.special_target_code, profile.marriage_status_code,
-            ) if code
-        ]
-        ctx.code_names = await ctx.deps.common_code_repository.get_names(codes)
+        ctx.code_names = await ctx.deps.common_code_repository.get_names(profile_codes(ctx.input.profile))
     return ctx.code_names
+
+
+# 프로필에서 이름을 찾아야 하는 공통코드. 1차 필터의 "기타" 판단과 표시에 씀 (채팅·추천)
+def profile_codes(profile: Profile) -> list[str]:
+    return [
+        code for code in (
+            profile.job_code, profile.school_code, profile.major_code,
+            profile.special_target_code, profile.marriage_status_code,
+        ) if code
+    ]
 
 
 def build_conditions(

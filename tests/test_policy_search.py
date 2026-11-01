@@ -190,3 +190,16 @@ async def test_inactive_policy_excluded(repository):
     assert total == 2
     every, _ = await _nos(repository, "")
     assert "T-GONE" not in every
+
+
+# 추천용 순서: 지금 신청할 수 있는 상시가 예정보다 앞 (그룹 안 순서는 검색과 같음)
+async def test_available_first_order(repository):
+    records, _ = await repository.search(PolicyFilter(), TODAY, 0, 100, available_first=True)
+
+    assert [r.policy_no for r in records if r.policy_no.startswith("S-")] == [
+        "S-OPEN-SOON-02", "S-OPEN-LATE-01", "S-OPEN-NOEND-03",
+        "S-ALWAYS-05", "S-ALWAYS-04",
+        "S-UPCOMING-07", "S-UPCOMING-06",
+        "S-UNKNOWN-08",
+        "S-CLOSED-CODE-11", "S-CLOSED-NEW-10", "S-CLOSED-OLD-09",
+    ]

@@ -93,6 +93,18 @@ class SessionNotFoundError(ApiError):
         super().__init__(status.HTTP_404_NOT_FOUND, "SESSION_NOT_FOUND", "세션을 찾을 수 없습니다.")
 
 
+# 한 번에 받는 LLM 응답(대화 요약 등)의 실패. 채팅은 스트림 중 error 이벤트로 같은 코드를 보냄
+# 화면에 그대로 보여 줄 문구는 API마다 달라 부르는 쪽이 정함
+class LlmUpstreamError(ApiError):
+    def __init__(self, message: str = "답변을 만드는 중 문제가 생겼어요. 다시 시도해 주세요.") -> None:
+        super().__init__(status.HTTP_502_BAD_GATEWAY, "RAG_UPSTREAM_ERROR", message)
+
+
+class LlmTimeoutError(ApiError):
+    def __init__(self, message: str = "답변을 만드는 데 시간이 너무 오래 걸렸어요. 다시 시도해 주세요.") -> None:
+        super().__init__(status.HTTP_504_GATEWAY_TIMEOUT, "RAG_TIMEOUT", message)
+
+
 class PolicyNotFoundError(ApiError):
     def __init__(self) -> None:
         super().__init__(status.HTTP_404_NOT_FOUND, "POLICY_NOT_FOUND", "정책을 찾을 수 없습니다.")

@@ -72,6 +72,7 @@ class FakeChatRepository:
         self.messages: dict[uuid.UUID, list[MessageItem]] = {}
         self.refs: dict[int, list[PolicyItem]] = {}
         self.current: dict[uuid.UUID, list[PolicyRef]] = {}
+        self.recent_categories: dict[uuid.UUID, list[list[str]]] = {}
         # 답변 id → 질문 id
         self.reply_to: dict[int, int] = {}
         self.metadata: dict[int, dict[str, Any]] = {}
@@ -106,6 +107,10 @@ class FakeChatRepository:
             if answer_id in by_id
         ]
         return [ConversationTurn(question=question.content, answer=answer.content) for question, answer in pairs[-turns:]]
+
+    # 방마다 최근 답변(최근부터)의 분석 분야. 추천 테스트가 직접 채움
+    async def list_recent_categories(self, room_id: uuid.UUID, answers: int) -> list[list[str]]:
+        return self.recent_categories.get(room_id, [])[:answers]
 
     async def list_current_policies(self, room_id: uuid.UUID) -> list[PolicyRef]:
         return self.current.get(room_id, [])
