@@ -96,6 +96,22 @@ LEFT JOIN LATERAL (
 WHERE q.room_id = :room_id AND q.client_message_id = :client_message_id AND q.role = 'user'
 """)
 
+# 답변 metadata의 질문 분석에서 하위 질문별 분야만 꺼냄. 최근 답변부터
+# 분석이 없는 답변(예전 형식 등)은 sub_queries가 배열이 아니어서 펼치지 않고 빈 목록으로 둠
+_LIST_RECENT_CATEGORIES_SQL = text("""
+SELECT ARRAY(
+    SELECT sub->>'category'
+    FROM jsonb_array_elements(
+        CASE WHEN jsonb_typeof(metadata->'analysis'->'sub_queries') = 'array'
+             THEN metadata->'analysis'->'sub_queries' ELSE '[]'::jsonb END
+    ) sub
+) AS categories
+FROM chat_message
+WHERE room_id = :room_id AND role = 'assistant'
+ORDER BY message_id DESC
+LIMIT :limit
+""")
+
 _LIST_CURRENT_POLICIES_SQL = text("""
 SELECT c.policy_no, p.policy_name
 FROM chat_current_policy c
@@ -218,6 +234,14 @@ class ChatRepository:
             )
             for row in rows
         ]
+
+    # 분석이 없거나 예비 경로로 간 답변은 빈 목록. 최근 답변부터
+    async def list_recent_categories(self, room_id: UUID, answers: int) -> list[list[str]]:
+        if answers <= 0:
+            return []
+        async with self._session_factory() as session:
+            result = await session.execute(_LIST_RECENT_CATEGORIES_SQL, {"room_id": room_id, "limit": answers})
+            return [[name for name in row["categories"] if name] for row in result.mappings()]
 
     async def find_question(self, room_id: UUID, client_message_id: UUID) -> QuestionRecord | None:
         async with self._session_factory() as session:

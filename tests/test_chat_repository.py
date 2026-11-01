@@ -397,3 +397,28 @@ async def test_inactive_policy_kept_in_history(chat_repository, session_factory)
     finally:
         async with session_factory() as session, session.begin():
             await session.execute(update, {"active": True, "at": None, "no": policy_no})
+
+
+def _analysis(*categories: str) -> dict:
+    return {"analysis": {"sub_queries": [{"category": category} for category in categories]}}
+
+
+# 추천의 "대화에서 나온 분야": 답변 metadata의 질문 분석에서 분야만, 최근 답변부터
+async def test_recent_categories_newest_first(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    await _save_turn(chat_repository, room_id, "질문1", metadata=_analysis("주거"))
+    await _save_turn(chat_repository, room_id, "질문2", metadata={"analysis": None})
+    await _save_turn(chat_repository, room_id, "질문3", metadata=_analysis("일자리", "없음"))
+    await _save_turn(chat_repository, room_id, "질문4", metadata={"analysis": {"sub_queries": None}})
+
+    assert await chat_repository.list_recent_categories(room_id, 3) == [[], ["일자리", "없음"], []]
+    assert await chat_repository.list_recent_categories(room_id, 10) == [[], ["일자리", "없음"], [], ["주거"]]
+    assert await chat_repository.list_recent_categories(room_id, 0) == []
+
+
+async def test_recent_categories_only_this_room(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    other = await chat_repository.create_room(USER_ID, Profile())
+    await _save_turn(chat_repository, other, "질문", metadata=_analysis("주거"))
+
+    assert await chat_repository.list_recent_categories(room_id, 3) == []
