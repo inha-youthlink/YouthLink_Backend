@@ -4,7 +4,7 @@ YouthLink RAG 기반 청년 지원 챗봇 및 신청 가이드 시스템의 백�
 
 - FastAPI 서버 하나가 프론트용 공개 API, 채팅 저장, RAG 파이프라인을 맡습니다. 로그인은 없고 브라우저별 익명 ID로 사용자를 구분합니다 (Spring은 두지 않기로 결정, [설계 문서](docs/design.md) 15절)
 - 정책 데이터와 임베딩은 ETL 서버가 적재하고, 평가 서버는 내부 API(`/internal/pipeline`)로 RAG 성능을 평가합니다
-- 공개 API(`/api/sessions` 등, 프론트 계약 기준)는 세션·채팅 SSE 뼈대까지 구현했고, 나머지는 9~10주차에 구현합니다 ([8주차 계획](docs/weekly/week08.md) 7절, [프론트 연동 현황](docs/front-sync.md))
+- 공개 API(`/api/*`)는 가이드 PDF를 빼고 모두 구현했습니다. 형식과 구현 현황은 [공개 API 계약](docs/api-contract.md)을 참고하세요
 - 배포 설정(컨테이너 이미지 등)은 별도 배포 저장소에서 관리합니다. 운영에 필요한 조건과 주의사항은 [운영 안내](docs/deploy.md)를 참고하세요
 
 ## 설계 및 작업 기록
