@@ -142,7 +142,7 @@ async def test_targeted_detail_uses_target_without_search():
     assert output.policies[0].region_label == "서울특별시"
     assert output.answer == "청년 이사비 지원은 상시 신청할 수 있어요."
     assert (output.trace["handler"], output.trace["answer_kind"]) == ("detail", "detail")
-    assert output.trace["prompt_version"] == "answer_common_v2+answer_detail_v1"
+    assert output.trace["prompt_version"] == "answer_common_v2+answer_detail_v2"
     assert output.current_policies == [MOVE]
     assert "filtered_policy_count" not in output.trace["conditions"]
     # 검색하지 않은 응답도 평가 서버가 읽는 키를 가짐
@@ -158,7 +158,7 @@ async def test_chitchat_answers_without_evidence():
     assert deps.retriever.calls == 0
     assert output.policies == []
     assert output.trace["contexts"] == []
-    assert output.trace["prompt_version"] == "answer_short_v1"
+    assert output.trace["prompt_version"] == "answer_short_v2"
     assert (output.trace["retrieved_chunks"], output.trace["filtered_policy_nos"]) == ([], None)
 
 
