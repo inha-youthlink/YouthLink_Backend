@@ -171,7 +171,7 @@ async def test_search_detail_keeps_card_line():
     result = await _generate(_ctx(llm, AnswerKind.DETAIL))
 
     # 처음 묻는 정책 이름은 검색 후보 중 하나를 LLM이 골라야 해서 첫 줄 형식을 유지함
-    assert result.prompt_version == "answer_common_v2+answer_cards_v2+answer_detail_v1"
+    assert result.prompt_version == "answer_common_v2+answer_cards_v2+answer_detail_v2"
     assert "# 출력 형식" in _system_prompt(llm)
     assert "# 신청 방법 안내" in _system_prompt(llm)
     assert result.card_numbers == [1]
@@ -182,7 +182,7 @@ async def test_fixed_cards_skip_card_line():
 
     result = await _generate(_ctx(llm, AnswerKind.DETAIL, fixed_cards=True))
 
-    assert result.prompt_version == "answer_common_v2+answer_detail_v1"
+    assert result.prompt_version == "answer_common_v2+answer_detail_v2"
     assert "[소개:" not in _system_prompt(llm)
     assert result.card_numbers == [1, 2]
     assert result.answer == "청년 월세 지원은 월 20만 원을 지원해요."
@@ -195,7 +195,7 @@ async def test_short_answer_has_no_evidence():
 
     result = await _generate(ctx)
 
-    assert result.prompt_version == "answer_short_v1"
+    assert result.prompt_version == "answer_short_v2"
     assert llm.messages[1]["content"] == "[질문]\n서울 월세 지원 알려줘"
     assert result.contexts == []
     assert result.card_numbers == []

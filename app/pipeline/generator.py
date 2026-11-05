@@ -19,10 +19,10 @@ COMMON_PROMPT = "answer_common_v2"
 CARDS_PROMPT = "answer_cards_v2"
 KIND_PROMPTS = {
     AnswerKind.RECOMMEND: "answer_recommend_v1",
-    AnswerKind.DETAIL: "answer_detail_v1",
+    AnswerKind.DETAIL: "answer_detail_v2",
 }
 # 근거가 없어 근거 사용 규칙이 담긴 공통 조각을 넣지 않음
-SHORT_PROMPT = "answer_short_v1"
+SHORT_PROMPT = "answer_short_v2"
 
 NO_RESTRICTION_NAME = "제한없음"
 MISSING = "정보 없음"
