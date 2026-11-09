@@ -13,6 +13,16 @@ class AnswerKind(StrEnum):
     DETAIL = "detail"
     SHORT = "short"
     CLARIFY = "clarify"
+    COMPARE = "compare"
+
+
+# 비교 대상 하나의 근거 구간. candidates 순서대로 size개씩 차지함
+@dataclass(frozen=True)
+class CompareGroup:
+    name: str
+    size: int
+    # 지목한 정책은 고를 필요가 없어 항상 카드로 보임
+    fixed: bool
 
 
 @dataclass(frozen=True)
@@ -28,3 +38,5 @@ class Evidence:
     filtered: bool = False
     # 되묻기처럼 LLM 없이 정해지는 답변
     reply: str | None = None
+    # 비교 답변에서 대상마다 하나를 고르도록 근거를 나눈 구간
+    compare_groups: list[CompareGroup] = field(default_factory=list)

@@ -6,6 +6,9 @@ from app.pipeline.conditions import SearchConditions
 from app.pipeline.evidence import AnswerKind
 from app.schemas.analysis import Intent
 
+# 비교는 두 정책씩만 함. 대상이 많으면 근거가 길어지고 카드도 많아져 되물음
+MAX_COMPARE_TARGETS = 2
+
 # 지목한 정책 하나하나의 근거가 필요한 질문이라 검색 없이 그 정책만 씀
 TARGETED_INTENTS = frozenset({Intent.POLICY_DETAIL, Intent.ELIGIBILITY, Intent.COMPARISON})
 
@@ -15,6 +18,7 @@ class Handler(StrEnum):
     DETAIL = "detail"
     SHORT = "short"
     CLARIFY = "clarify"
+    COMPARE = "compare"
 
 
 @dataclass(frozen=True)
@@ -27,7 +31,7 @@ def choose_route(analysis: AnalysisResult, conditions: SearchConditions) -> Rout
     route = _route_by_analysis(analysis)
     # 검색은 프로필로 거르므로 질문의 지역·나이가 다르면 말한 조건과 다른 결과를 보여 주게 되어 되물음
     # 지목한 정책은 거르지 않고 그 정책만 쓰므로 답변에서 자격 차이를 설명함
-    if route.handler == Handler.SEARCH and conditions.ask_back:
+    if _searches(route, analysis) and conditions.ask_back:
         return Route(Handler.CLARIFY, AnswerKind.CLARIFY)
     return route
 
@@ -42,9 +46,25 @@ def _route_by_analysis(analysis: AnalysisResult) -> Route:
         return Route(Handler.SHORT, AnswerKind.SHORT)
     if sub.intent == Intent.UNCLEAR or sub.unresolved_refs:
         return Route(Handler.CLARIFY, AnswerKind.CLARIFY)
+    # 대상이 하나뿐인 비교는 비교할 상대가 없어 아래 규칙대로 상세나 검색으로 감
+    target_count = len(sub.targets) + len(sub.compare_queries)
+    if sub.intent == Intent.COMPARISON and target_count >= 2:
+        kind = AnswerKind.COMPARE if target_count <= MAX_COMPARE_TARGETS else AnswerKind.CLARIFY
+        return Route(Handler.COMPARE, kind)
     if sub.targets and sub.intent in TARGETED_INTENTS:
         return Route(Handler.DETAIL, AnswerKind.DETAIL)
     # 처음 묻는 정책 이름은 지목할 카드가 없어 검색으로 찾고 상세하게 답함
     if sub.intent == Intent.POLICY_DETAIL:
         return Route(Handler.SEARCH, AnswerKind.DETAIL)
     return Route(Handler.SEARCH, AnswerKind.RECOMMEND)
+
+
+# 비교 핸들러도 지목하지 못한 대상은 프로필로 걸러 검색함
+def _searches(route: Route, analysis: AnalysisResult) -> bool:
+    if route.handler == Handler.SEARCH:
+        return True
+    return (
+        route.handler == Handler.COMPARE
+        and route.answer_kind == AnswerKind.COMPARE
+        and any(sub.compare_queries for sub in analysis.sub_queries)
+    )

@@ -114,3 +114,48 @@ async def test_get_detail_reads_inactive(detail_repository, session_factory):
 
 async def test_get_detail_unknown(detail_repository):
     assert await detail_repository.get_detail("D-NONE") is None
+
+
+NAME_POLICIES = [
+    ("N-SAVE", "청년 자산형성 지원(청년도약계좌)", True),
+    ("N-SAVE-OLD", "청년도약계좌", False),
+    ("N-JOB", "청년일자리도약장려금", True),
+    ("N-PERCENT", "100% 환급 청년 지원", True),
+]
+
+
+@pytest.fixture
+async def name_repository(session_factory):
+    async with session_factory() as session, session.begin():
+        await session.execute(
+            text("""INSERT INTO policy (policy_no, policy_name, is_active, deactivated_at)
+                VALUES (:no, :name, :active, :at)"""),
+            [
+                {"no": no, "name": name, "active": active, "at": None if active else datetime(2026, 10, 20, tzinfo=UTC)}
+                for no, name, active in NAME_POLICIES
+            ],
+        )
+    yield PolicyRepository(session_factory)
+    async with session_factory() as session, session.begin():
+        await session.execute(
+            text("DELETE FROM policy WHERE policy_no = ANY(:nos)"), {"nos": [no for no, _, _ in NAME_POLICIES]}
+        )
+
+
+# 공백을 빼고 비교해 "청년 도약계좌"도 붙여 쓴 이름에 걸리고, 비활성 정책은 빠짐
+async def test_find_nos_by_name_ignores_spaces_and_inactive(name_repository):
+    assert await name_repository.find_nos_by_name("청년 도약계좌", None, 10) == ["N-SAVE"]
+    assert await name_repository.find_nos_by_name("도약", None, 10) == ["N-SAVE", "N-JOB"]
+
+
+async def test_find_nos_by_name_within_filter_and_limit(name_repository):
+    assert await name_repository.find_nos_by_name("도약", ["N-JOB"], 10) == ["N-JOB"]
+    assert await name_repository.find_nos_by_name("도약", [], 10) == []
+    assert await name_repository.find_nos_by_name("도약", None, 1) == ["N-SAVE"]
+
+
+# %가 와일드카드로 읽히면 모든 정책이 걸림. 한 글자는 거의 모든 이름에 들어 있어 찾지 않음
+async def test_find_nos_by_name_literal_and_too_short(name_repository):
+    assert await name_repository.find_nos_by_name("0% 환급", None, 10) == ["N-PERCENT"]
+    assert await name_repository.find_nos_by_name("%", None, 10) == []
+    assert await name_repository.find_nos_by_name("청 ", None, 10) == []

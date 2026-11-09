@@ -32,9 +32,11 @@ class FakeLLM:
     embedding_model = "fake-embedding-model"
     analysis_model = "fake-analysis-model"
 
-    def __init__(self, intent: Intent, refs: list[str], answer: str, region: str = "") -> None:
+    def __init__(
+        self, intent: Intent, refs: list[str], answer: str, region: str = "", queries: list[str] | None = None
+    ) -> None:
         self._sub = SubQuery(
-            standalone_question="질문", search_query="청년 주거 지원", target_refs=refs, compare_queries=[], intent=intent,
+            standalone_question="질문", search_query="청년 주거 지원", target_refs=refs, compare_queries=queries or [], intent=intent,
             status_filter=StatusFilter.NONE, region=region, age=None, job_status=JobStatus.NONE, school=SchoolLevel.NONE,
             category=Category.NONE,
         )
@@ -86,6 +88,9 @@ class FakePolicyRepository:
 
     async def get_region_labels(self, policy_nos):
         return {no: "서울특별시" for no in policy_nos}
+
+    async def find_nos_by_name(self, name, policy_nos, limit):
+        return []
 
 
 class FakeCommonCodes:
@@ -242,3 +247,31 @@ async def test_closing_pipeline_stream_closes_llm_stream():
     await events.aclose()
 
     assert llm.stream_closed
+
+
+async def test_targeted_comparison_compares_without_search():
+    llm = FakeLLM(Intent.COMPARISON, ["1", "2"], "청년 월세 지원과 청년 이사비 지원을 비교해 드릴게요.")
+    deps = _deps(llm)
+
+    output = await run_pipeline(PipelineInput(question="1번이랑 2번 차이가 뭐야?", history=SHOWN), deps)
+
+    assert deps.retriever.calls == 0
+    assert (output.trace["handler"], output.trace["answer_kind"]) == ("compare", "compare")
+    assert output.trace["prompt_version"] == "answer_common_v2+answer_compare_v1"
+    assert [policy.policy_no for policy in output.policies] == ["P-RENT", "P-MOVE"]
+
+
+# 지목한 정책은 검색 후보에서 빠지고, LLM이 대상마다 하나를 고름
+async def test_comparison_with_name_searches_other_target():
+    llm = FakeLLM(Intent.COMPARISON, ["1"], "[소개: 1,2]\n비교해 드릴게요.", queries=["이사비 지원"])
+    deps = _deps(llm)
+
+    output = await run_pipeline(PipelineInput(question="1번이랑 이사비 지원 비교해 줘", history=SHOWN), deps)
+
+    assert deps.retriever.calls == 1
+    assert output.trace["prompt_version"] == "answer_common_v2+answer_compare_cards_v1+answer_compare_v1"
+    assert output.trace["compare"]["queries"] == [
+        {"query": "이사비 지원", "candidate_nos": ["P-MOVE"], "name_match_count": 0}
+    ]
+    assert [policy.policy_no for policy in output.policies] == ["P-RENT", "P-MOVE"]
+    assert output.answer == "비교해 드릴게요."
