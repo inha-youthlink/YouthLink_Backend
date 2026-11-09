@@ -1,7 +1,11 @@
 import math
+from dataclasses import replace
+from uuid import UUID
 
 from app.core.errors import PolicyNotFoundError
 from app.pipeline.conditions import RegionIndex
+from app.repositories.chat_repository import ChatRepository
+from app.repositories.common_code_repository import CommonCodeRepository
 from app.repositories.policy_repository import PolicyFilter, PolicyRepository
 from app.schemas.policy import POLICY_ID_MAX_CHARS, PolicyDetail, RegionOption, SidoRegions
 from app.schemas.policy_info import CATEGORY_NAMES, today_kst
@@ -9,6 +13,7 @@ from app.schemas.public import Page
 from app.schemas.session import POLICY_CATEGORIES, PolicyCategory, PolicySummary
 from app.services.policy_detail import clean_text, eligibility_text, missing_text
 from app.services.profile_codes import region_code
+from app.services.session_profile import get_owned_room, profile_conditions
 
 _CATEGORY_BY_POLICY_CATEGORY = {policy_category: category for category, policy_category in POLICY_CATEGORIES.items()}
 
@@ -18,8 +23,15 @@ SIDO_ORDER = ("11", "41", "28", "26", "27", "12", "30", "31", "36", "51", "43", 
 
 
 class PolicyService:
-    def __init__(self, policy_repository: PolicyRepository) -> None:
+    def __init__(
+        self,
+        policy_repository: PolicyRepository,
+        chat_repository: ChatRepository,
+        common_code_repository: CommonCodeRepository,
+    ) -> None:
         self._policy_repository = policy_repository
+        self._chat_repository = chat_repository
+        self._common_code_repository = common_code_repository
 
     # 프로필 검증·1차 필터와 같은 RegionIndex로 만들어 목록의 코드가 모두 세션 생성에서 받아짐
     async def list_regions(self) -> list[SidoRegions]:
@@ -37,6 +49,7 @@ class PolicyService:
             groups.append(SidoRegions(code=f"{sido_code}000", name=sido_name, sigungu=options))
         return groups
 
+    # 세션을 주면 지역 대신 그 세션 프로필로 1차 필터를 검 (채팅방 안 검색). 지역과 함께 오는 경우는 라우터가 막음
     async def search(
         self,
         keyword: str | None,
@@ -44,15 +57,18 @@ class PolicyService:
         region: str | None,
         page: int,
         size: int,
+        *,
+        client_id: str,
+        session_id: UUID | None = None,
     ) -> Page[PolicySummary]:
-        scope = None
-        if region is not None:
-            regions = RegionIndex(await self._policy_repository.list_regions())
-            # 프로필과 같은 범위(고른 지역 + 그 시도 전체 + 전국)로 거름
-            scope = regions.profile_region(region_code(region, regions, field="region"))
-        policy_filter = PolicyFilter(
-            sido_code=scope.sido_code if scope else None,
-            region_codes=scope.codes if scope else (),
+        if session_id is not None:
+            room = await get_owned_room(self._chat_repository, session_id, client_id)
+            conditions = await profile_conditions(room, self._policy_repository, self._common_code_repository)
+            base_filter = conditions.to_filter()
+        else:
+            base_filter = await self._region_filter(region)
+        policy_filter = replace(
+            base_filter,
             keywords=tuple(keyword.split()) if keyword else (),
             large_categories=_large_category_names(category),
         )
@@ -65,6 +81,16 @@ class PolicyService:
             for record in records
         ]
         return Page(items=items, page=page, size=size, total_elements=total, total_pages=math.ceil(total / size))
+
+    async def _region_filter(self, region: str | None) -> PolicyFilter:
+        if region is None:
+            return PolicyFilter()
+        regions = RegionIndex(await self._policy_repository.list_regions())
+        # 프로필과 같은 범위(고른 지역 + 그 시도 전체 + 전국)로 거름
+        scope = regions.profile_region(region_code(region, regions, field="region"))
+        if scope is None:
+            return PolicyFilter()
+        return PolicyFilter(sido_code=scope.sido_code, region_codes=scope.codes)
 
     async def get_detail(self, policy_id: str) -> PolicyDetail:
         # DB 컬럼(VARCHAR(30))보다 긴 ID는 있을 수 없어 조회하지 않음
