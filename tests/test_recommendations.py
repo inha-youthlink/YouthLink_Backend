@@ -17,6 +17,7 @@ from tests.conftest import (
     HEADERS,
     OTHER_CLIENT_ID,
     FakeChatRepository,
+    FakeCodes,
     FakePolicyRepository,
 )
 
@@ -57,14 +58,6 @@ class SearchPolicyRepository(FakePolicyRepository):
 
     async def get_region_labels(self, policy_nos):
         return {"P-1": "서울특별시"}
-
-
-class FakeCodes:
-    def __init__(self, names: dict[str, str]) -> None:
-        self.names = names
-
-    async def get_names(self, codes):
-        return {code: self.names.get(code, "이름") for code in codes}
 
 
 @pytest.fixture

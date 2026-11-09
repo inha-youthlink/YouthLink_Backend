@@ -6,20 +6,16 @@ from uuid import UUID
 from openai import APITimeoutError, OpenAIError
 
 from app.core.dependencies import PipelineDeps
-from app.core.errors import LlmTimeoutError, LlmUpstreamError, SessionNotFoundError
+from app.core.errors import LlmTimeoutError, LlmUpstreamError
 from app.core.rate_limit import RateLimits
-from app.pipeline.conditions import (
-    RegionIndex,
-    SearchConditions,
-    build_conditions,
-    profile_codes,
-)
+from app.pipeline.conditions import SearchConditions
 from app.pipeline.prompts import load_prompt
 from app.repositories.chat_repository import ChatRepository, RoomRecord
 from app.schemas.analysis import Category
 from app.schemas.pipeline import ConversationTurn
 from app.schemas.policy_info import CATEGORY_NAMES, today_kst
 from app.schemas.session import PolicySummary
+from app.services.session_profile import get_owned_room, profile_conditions
 
 # 대화 보조 (계약 4.2): 채팅방의 "추천 정책"·"대화 요약" 버튼
 MAX_RECOMMENDATIONS = 10
@@ -46,7 +42,7 @@ class AssistService:
         self._deps = pipeline_deps
 
     async def summarize(self, room_id: UUID, client_id: str, limits: RateLimits) -> str:
-        room = await self._get_owned_room(room_id, client_id)
+        room = await get_owned_room(self._chat_repository, room_id, client_id)
         turns = await self._chat_repository.list_recent_turns(room_id, SUMMARY_TURNS)
         # 대화가 없으면 LLM을 부르지 않아 하루 상한에도 세지 않음
         if not turns:
@@ -82,7 +78,7 @@ class AssistService:
     # 프로필로 1차 필터를 건 뒤 대화에서 나온 분야로 좁힘 (계약 B3). 분야가 없으면 프로필 기준만
     # 대화 문장이 아니라 저장된 질문 분석의 분야를 읽어 LLM을 부르지 않음
     async def recommend(self, room_id: UUID, client_id: str) -> list[PolicySummary]:
-        room = await self._get_owned_room(room_id, client_id)
+        room = await get_owned_room(self._chat_repository, room_id, client_id)
         policy_repository = self._deps.policy_repository
         conditions = await self._profile_conditions(room)
         # 채팅이 대화 기록으로 쓰는 턴 수만큼 봐 주제가 바뀌면 추천도 따라감
@@ -106,19 +102,8 @@ class AssistService:
             for record in records
         ]
 
-
-    # 다른 사용자의 세션이 있는지 숨기려고 없는 경우와 같은 응답을 씀
-    async def _get_owned_room(self, room_id: UUID, client_id: str) -> RoomRecord:
-        room = await self._chat_repository.get_room(room_id)
-        if room is None or room.user_id != client_id:
-            raise SessionNotFoundError
-        return room
-
-    # 채팅 검색과 같은 프로필 조건 (1차 필터, 표시 문구)
     async def _profile_conditions(self, room: RoomRecord) -> SearchConditions:
-        regions = RegionIndex(await self._deps.policy_repository.list_regions())
-        code_names = await self._deps.common_code_repository.get_names(profile_codes(room.profile))
-        return build_conditions(None, room.profile, regions, code_names)
+        return await profile_conditions(room, self._deps.policy_repository, self._deps.common_code_repository)
 
 
 # 오래된 턴부터. 답변은 앞부분만, 카드는 정책 이름만
