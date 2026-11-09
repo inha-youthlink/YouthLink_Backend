@@ -7,6 +7,7 @@ from app.pipeline.cards import pick_candidates
 from app.pipeline.context import PipelineContext
 from app.pipeline.evidence import NO_SCORE, AnswerKind, CompareGroup, Evidence
 from app.pipeline.grouping import PolicyGroup, group_by_policy
+from app.pipeline.handlers.search import filtered_policy_nos, record_retrieval
 from app.repositories.policy_repository import PolicyRecord
 from app.schemas.pipeline import Chunk
 
@@ -35,7 +36,7 @@ async def collect(ctx: PipelineContext) -> Evidence:
     latency = ctx.trace.setdefault("latency_ms", {})
     started = perf_counter()
     target_nos = sub.target_policy_nos
-    policy_ids = await _filtered_policy_nos(ctx) if sub.compare_queries else None
+    policy_ids = await filtered_policy_nos(ctx) if sub.compare_queries else None
     found = await asyncio.gather(*(_search(ctx, query, policy_ids) for query in sub.compare_queries))
     latency["compare_search"] = _elapsed_ms(started)
 
@@ -82,20 +83,8 @@ async def collect(ctx: PipelineContext) -> Evidence:
 
     ctx.trace["compare"] = {"target_policy_nos": target_nos, "queries": query_traces}
     if sub.compare_queries:
-        # 평가 서버가 검색 핸들러와 같은 키로 검색 결과를 읽음. 대상별 검색 결과를 이어 붙임
-        ctx.trace["filtered_policy_nos"] = policy_ids
-        ctx.trace["retrieved_chunks"] = [
-            {
-                "chunk_id": str(chunk.chunk_id),
-                "policy_no": chunk.policy_no,
-                "chunk_type": chunk.chunk_type,
-                "chunk_index": chunk.chunk_index,
-                "score": chunk.score,
-                "content": chunk.content,
-            }
-            for result in found
-            for chunk in result.chunks
-        ]
+        # 대상별 검색 결과를 이어 붙임. 대상별 구분은 compare.queries의 후보 번호로 봄
+        record_retrieval(ctx, policy_ids, [chunk for result in found for chunk in result.chunks])
     return Evidence(
         candidates=candidates,
         policies={no: policies[no] for no in candidate_nos},
@@ -106,13 +95,6 @@ async def collect(ctx: PipelineContext) -> Evidence:
         filtered=bool(sub.compare_queries),
         compare_groups=groups,
     )
-
-
-async def _filtered_policy_nos(ctx: PipelineContext) -> list[str] | None:
-    policy_filter = ctx.conditions.to_filter()
-    if policy_filter.is_empty():
-        return None
-    return await ctx.deps.policy_repository.filter_policy_nos(policy_filter, ctx.today)
 
 
 # 이름이 맞는 정책을 먼저, 남는 자리는 벡터 순위로 채움. 둘 다 상태 감점을 적용하고 같은 이름은 하나만 남김

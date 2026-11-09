@@ -4,6 +4,7 @@ from app.pipeline.cards import local_first, pick_candidates
 from app.pipeline.context import PipelineContext
 from app.pipeline.evidence import Evidence
 from app.pipeline.grouping import group_by_policy
+from app.schemas.pipeline import Chunk
 
 
 async def collect(ctx: PipelineContext) -> Evidence:
@@ -12,11 +13,7 @@ async def collect(ctx: PipelineContext) -> Evidence:
 
     started = perf_counter()
     conditions = ctx.conditions
-    policy_filter = conditions.to_filter()
-    policy_ids = (
-        None if policy_filter.is_empty()
-        else await deps.policy_repository.filter_policy_nos(policy_filter, ctx.today)
-    )
+    policy_ids = await filtered_policy_nos(ctx)
     latency["filter"] = _elapsed_ms(started)
 
     # 임베딩이 검색기 안에서 실행되어 임베딩과 벡터 검색을 합친 시간으로 기록함
@@ -38,6 +35,22 @@ async def collect(ctx: PipelineContext) -> Evidence:
         candidates = local_first(candidates, region_labels, conditions.region.sido_name)
     latency["policy_lookup"] = _elapsed_ms(started)
 
+    record_retrieval(ctx, policy_ids, chunks)
+    return Evidence(
+        candidates=candidates, policies=policies, documents=documents, region_labels=region_labels, filtered=True
+    )
+
+
+# 프로필 1차 필터. None이면 조건이 없어 걸지 않음 (비교 핸들러도 같은 기준으로 거름)
+async def filtered_policy_nos(ctx: PipelineContext) -> list[str] | None:
+    policy_filter = ctx.conditions.to_filter()
+    if policy_filter.is_empty():
+        return None
+    return await ctx.deps.policy_repository.filter_policy_nos(policy_filter, ctx.today)
+
+
+# 평가 서버가 검색 핸들러와 비교 핸들러의 검색 결과를 같은 키로 읽어 한곳에서 기록함
+def record_retrieval(ctx: PipelineContext, policy_ids: list[str] | None, chunks: list[Chunk]) -> None:
     ctx.trace.setdefault("conditions", {})["filtered_policy_count"] = (
         None if policy_ids is None else len(policy_ids)
     )
@@ -56,9 +69,6 @@ async def collect(ctx: PipelineContext) -> Evidence:
             for chunk in chunks
         ],
     })
-    return Evidence(
-        candidates=candidates, policies=policies, documents=documents, region_labels=region_labels, filtered=True
-    )
 
 
 def _elapsed_ms(started: float) -> int:

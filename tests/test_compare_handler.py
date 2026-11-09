@@ -200,6 +200,7 @@ async def test_profile_filter_applies_to_both_searches():
     assert ctx.deps.retriever.calls == [("도약계좌", ["P-SAVE", "P-JOB"]), ("내일저축계좌", ["P-SAVE", "P-JOB"])]
     assert repository.name_calls == [("도약계좌", ["P-SAVE", "P-JOB"]), ("내일저축계좌", ["P-SAVE", "P-JOB"])]
     assert ctx.trace["filtered_policy_nos"] == ["P-SAVE", "P-JOB"]
+    assert ctx.trace["conditions"]["filtered_policy_count"] == 2
 
 
 async def test_query_without_candidates_keeps_empty_group():

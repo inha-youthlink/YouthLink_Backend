@@ -59,12 +59,12 @@ def _route_by_analysis(analysis: AnalysisResult) -> Route:
     return Route(Handler.SEARCH, AnswerKind.RECOMMEND)
 
 
-# 비교 핸들러도 지목하지 못한 대상은 프로필로 걸러 검색함
+# 비교 핸들러도 지목하지 못한 대상은 프로필로 걸러 검색함. 비교 경로는 하위 질문이 하나일 때만 옴
 def _searches(route: Route, analysis: AnalysisResult) -> bool:
     if route.handler == Handler.SEARCH:
         return True
     return (
         route.handler == Handler.COMPARE
         and route.answer_kind == AnswerKind.COMPARE
-        and any(sub.compare_queries for sub in analysis.sub_queries)
+        and bool(analysis.sub_queries[0].compare_queries)
     )
