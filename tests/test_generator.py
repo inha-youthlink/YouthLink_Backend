@@ -351,10 +351,12 @@ async def test_compare_evidence_grouped_by_target():
     result = await _generate(_compare_ctx(llm))
 
     user_message = llm.messages[1]["content"]
-    assert "[비교 대상 1: 청년 월세 지원]\n\n<정책 1> 청년 월세 지원" in user_message
+    assert "[비교 대상 1: 청년 월세 지원 (사용자가 가리킨 정책)]\n\n<정책 1> 청년 월세 지원" in user_message
     assert "[비교 대상 2: 도약계좌]\n\n<정책 2> 청년 자산형성 지원(청년도약계좌)" in user_message
     assert "\n\n<정책 3> 청년일자리도약장려금" in user_message
     assert "[비교 대상 3: 없는 정책]\n검색된 정책 없음" in user_message
+    # 표시 문구가 카드 규칙과 어긋나면 LLM이 지목 대상을 알아보지 못함
+    assert "(사용자가 가리킨 정책)" in _system_prompt(llm)
     assert result.prompt_version == "answer_common_v2+answer_compare_cards_v1+answer_compare_v1"
     assert "# 비교 답변" in _system_prompt(llm)
     assert "최대 3개" not in _system_prompt(llm)

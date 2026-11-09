@@ -19,6 +19,8 @@ COMMON_PROMPT = "answer_common_v2"
 CARDS_PROMPT = "answer_cards_v2"
 # 비교는 "최대 3개"가 아니라 대상마다 하나를 골라 추천과 고르는 규칙이 다름
 COMPARE_CARDS_PROMPT = "answer_compare_cards_v1"
+# answer_compare_cards_v1의 규칙 문구와 같아야 함
+POINTED_MARK = "사용자가 가리킨 정책"
 KIND_PROMPTS = {
     AnswerKind.RECOMMEND: "answer_recommend_v1",
     AnswerKind.DETAIL: "answer_detail_v2",
@@ -214,12 +216,14 @@ async def _user_message(ctx: PipelineContext, contexts: list[str]) -> str:
 
 
 # 근거만 보고는 어느 후보가 어느 대상의 것인지 알 수 없어 대상별 머리말로 나눔. 근거 블록(contexts)은 그대로 둠
+# 검색한 대상도 후보가 하나뿐일 수 있어, 고를 필요 없는 지목 대상은 후보 수가 아니라 표시로 알림
 def _compare_evidence(contexts: list[str], groups: list[CompareGroup]) -> str:
     parts = []
     start = 0
     for order, group in enumerate(groups, start=1):
         blocks = contexts[start:start + group.size]
-        head = f"[비교 대상 {order}: {group.name}]"
+        mark = f" ({POINTED_MARK})" if group.fixed else ""
+        head = f"[비교 대상 {order}: {group.name}{mark}]"
         parts.append("\n\n".join([head, *blocks]) if blocks else f"{head}\n{NO_EVIDENCE}")
         start += group.size
     return "\n\n".join(parts)
