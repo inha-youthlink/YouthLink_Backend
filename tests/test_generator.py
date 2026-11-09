@@ -8,7 +8,7 @@ from app.llm.client import ChatUsage, LLMStreamError
 from app.pipeline import generator
 from app.pipeline.conditions import RegionIndex, build_conditions
 from app.pipeline.context import PipelineContext
-from app.pipeline.evidence import AnswerKind, Evidence
+from app.pipeline.evidence import AnswerKind, CompareGroup, Evidence
 from app.pipeline.generator import (
     AnswerDelta,
     CardsDecided,
@@ -320,3 +320,76 @@ async def test_closing_stream_closes_llm_stream():
     await events.aclose()
 
     assert llm.closed
+
+
+# 지목 1개(1번) + 검색 대상 2개(2~3번, 후보 없음)
+COMPARE_GROUPS = [
+    CompareGroup("청년 월세 지원", 1, fixed=True),
+    CompareGroup("도약계좌", 2, fixed=False),
+    CompareGroup("없는 정책", 0, fixed=False),
+]
+
+
+def _compare_ctx(llm: FakeLLM, groups: list[CompareGroup] = COMPARE_GROUPS, fixed_cards: bool = False):
+    ctx = _ctx(llm, AnswerKind.COMPARE, fixed_cards)
+    names = {"P-RENT": "청년 월세 지원", "P-SAVE": "청년 자산형성 지원(청년도약계좌)", "P-JOB": "청년일자리도약장려금"}
+    nos = list(names)[: sum(group.size for group in groups)]
+    ctx.evidence = Evidence(
+        candidates=[PolicyGroup(no, 0.0, []) for no in nos],
+        policies={no: _record(no, names[no]) for no in nos},
+        fixed_cards=fixed_cards,
+        filtered=not fixed_cards,
+        compare_groups=groups,
+    )
+    return ctx
+
+
+# 근거는 대상별 머리말로 나누고, 평가 서버로 가는 근거 블록에는 머리말을 넣지 않음
+async def test_compare_evidence_grouped_by_target():
+    llm = FakeLLM("[소개: 1,2]\n청년 월세 지원과 청년도약계좌를 비교해 드릴게요.")
+
+    result = await _generate(_compare_ctx(llm))
+
+    user_message = llm.messages[1]["content"]
+    assert "[비교 대상 1: 청년 월세 지원 (사용자가 가리킨 정책)]\n\n<정책 1> 청년 월세 지원" in user_message
+    assert "[비교 대상 2: 도약계좌]\n\n<정책 2> 청년 자산형성 지원(청년도약계좌)" in user_message
+    assert "\n\n<정책 3> 청년일자리도약장려금" in user_message
+    assert "[비교 대상 3: 없는 정책]\n검색된 정책 없음" in user_message
+    # 표시 문구가 카드 규칙과 어긋나면 LLM이 지목 대상을 알아보지 못함
+    assert "(사용자가 가리킨 정책)" in _system_prompt(llm)
+    assert result.prompt_version == "answer_common_v2+answer_compare_cards_v1+answer_compare_v1"
+    assert "# 비교 답변" in _system_prompt(llm)
+    assert "최대 3개" not in _system_prompt(llm)
+    assert result.card_numbers == [1, 2]
+    assert len(result.contexts) == 3
+    assert not any("[비교 대상" in context for context in result.contexts)
+
+
+# 한 대상에서 여럿을 고르거나 지목한 정책을 빼면 카드를 보내기 전에 고침
+@pytest.mark.parametrize(
+    ("text", "cards"),
+    [
+        ("[소개: 2,3]\n비교", [1, 2]),
+        ("비교 본문만 있음", [1, 2]),
+        ("[소개: 1]\n도약계좌는 찾지 못했어요.", [1]),
+    ],
+)
+async def test_compare_card_line_checked_before_cards(text, cards):
+    ctx = _compare_ctx(FakeLLM(text))
+
+    events = await _events(ctx)
+
+    assert events[0] == CardsDecided(cards)
+    assert events[-1].card_numbers == cards
+    assert ctx.trace.get("compare", {}).get("card_line_fixed", False) is (text != "[소개: 1]\n도약계좌는 찾지 못했어요.")
+
+
+async def test_compare_targets_only_skip_card_line():
+    groups = [CompareGroup("청년 월세 지원", 1, fixed=True), CompareGroup("청년 자산형성 지원(청년도약계좌)", 1, fixed=True)]
+    llm = FakeLLM("두 정책을 비교해 드릴게요.")
+
+    result = await _generate(_compare_ctx(llm, groups, fixed_cards=True))
+
+    assert result.prompt_version == "answer_common_v2+answer_compare_v1"
+    assert "[소개:" not in _system_prompt(llm)
+    assert result.card_numbers == [1, 2]

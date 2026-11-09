@@ -17,7 +17,7 @@ from app.pipeline.generator import (
     GenerationResult,
     generate_stream,
 )
-from app.pipeline.handlers import clarify, detail, search, short
+from app.pipeline.handlers import clarify, compare, detail, search, short
 from app.pipeline.router import Handler, choose_route
 from app.schemas.pipeline import PipelineInput, PipelineOutput, PolicyItem
 
@@ -28,6 +28,7 @@ HANDLERS: dict[Handler, Callable[[PipelineContext], Awaitable[Evidence]]] = {
     Handler.DETAIL: detail.collect,
     Handler.SHORT: short.collect,
     Handler.CLARIFY: clarify.collect,
+    Handler.COMPARE: compare.collect,
 }
 
 

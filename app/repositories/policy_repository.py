@@ -207,6 +207,21 @@ class PolicyRepository:
             result = await session.execute(_GET_BY_IDS_SQL, {"policy_nos": policy_nos})
             return {row["policy_no"]: PolicyRecord(**row) for row in result.mappings()}
 
+    # 벡터 검색이 놓치는 줄인 이름("도약계좌" → "청년 자산형성 지원(청년도약계좌)")을 찾으려고 공백을 빼고 포함 여부로 비교함
+    async def find_nos_by_name(self, name: str, policy_nos: list[str] | None, limit: int) -> list[str]:
+        compact = "".join(name.split())
+        # 한 글자는 거의 모든 정책 이름에 들어 있어 이름 일치로 보지 않음
+        if len(compact) < 2 or policy_nos == []:
+            return []
+        params: dict[str, Any] = {"pattern": f"%{_escape_like(compact)}%", "limit": limit}
+        clauses = ["p.is_active", r"replace(p.policy_name, ' ', '') ILIKE :pattern ESCAPE '\'"]
+        if policy_nos is not None:
+            clauses.append("p.policy_no = ANY(:policy_nos)")
+            params["policy_nos"] = policy_nos
+        sql = text(f"SELECT p.policy_no FROM policy p WHERE {' AND '.join(clauses)} ORDER BY p.policy_no DESC LIMIT :limit")
+        async with self._session_factory() as session:
+            return list((await session.execute(sql, params)).scalars())
+
     async def list_regions(self) -> list[RegionRow]:
         async with self._session_factory() as session:
             result = await session.execute(_LIST_REGIONS_SQL)

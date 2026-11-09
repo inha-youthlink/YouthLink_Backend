@@ -13,7 +13,7 @@ from app.schemas.pipeline import ConversationTurn, PipelineInput, PolicyRef
 
 logger = logging.getLogger(__name__)
 
-PROMPT_NAME = "analyze_v7"
+PROMPT_NAME = "analyze_v8"
 # 프롬프트 규칙("최대 3개")과 함께 바뀌어야 해서 설정값이 아닌 상수로 둠
 MAX_SUB_QUERIES = 3
 NONE_TEXT = "없음"
@@ -41,6 +41,8 @@ class ResolvedSubQuery:
     category: Category = Category.NONE
     # 후보에 없는 표기. 없는 카드 번호를 가리킨 경우라 라우터가 되묻기로 보냄
     unresolved_refs: list[str] = field(default_factory=list)
+    # 비교 질문일 때만 남음. 대상 수로 라우터가 비교 여부를 정함
+    compare_queries: list[str] = field(default_factory=list)
 
     @property
     def target_policy_nos(self) -> list[str]:
@@ -68,6 +70,7 @@ class AnalysisResult:
                     "search_query": sub.search_query,
                     "target_refs": sub.target_refs,
                     "target_policy_nos": sub.target_policy_nos,
+                    "compare_queries": sub.compare_queries,
                     "intent": sub.intent.value,
                     "status_filter": sub.status_filter.value,
                     "region": sub.region,
@@ -165,7 +168,15 @@ def _resolve(sub: SubQuery, labels: dict[str, PolicyRef]) -> ResolvedSubQuery:
         school=sub.school,
         category=sub.category,
         unresolved_refs=[ref for ref in refs if ref not in labels],
+        compare_queries=_compare_queries(sub),
     )
+
+
+# 비교가 아닌데 대상이 나오면 라우터가 비교로 보내지 않도록 버림. 대상 수가 규칙이라 개수는 자르지 않음
+def _compare_queries(sub: SubQuery) -> list[str]:
+    if sub.intent != Intent.COMPARISON:
+        return []
+    return list(dict.fromkeys(query.strip() for query in sub.compare_queries if query.strip()))
 
 
 # 숫자는 화면 카드 번호와 같아야 해서 직전 답변에만 붙이고, 화면 밖 현재 정책은 C 표기로 구분함

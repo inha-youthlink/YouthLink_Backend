@@ -8,12 +8,19 @@ from app.schemas.analysis import Intent, StatusFilter
 from app.schemas.pipeline import PolicyRef
 
 RENT = PolicyRef(policy_no="P-RENT", policy_name="청년 월세 지원")
+MOVE = PolicyRef(policy_no="P-MOVE", policy_name="청년 이사비 지원")
+LOAN = PolicyRef(policy_no="P-LOAN", policy_name="청년 전세대출")
 
 
-def _sub(intent: Intent, targets: list[PolicyRef] | None = None, unresolved: list[str] | None = None) -> ResolvedSubQuery:
+def _sub(
+    intent: Intent,
+    targets: list[PolicyRef] | None = None,
+    unresolved: list[str] | None = None,
+    queries: list[str] | None = None,
+) -> ResolvedSubQuery:
     return ResolvedSubQuery(
         standalone_question="q", target_refs=[], targets=targets or [], intent=intent,
-        status_filter=StatusFilter.NONE, unresolved_refs=unresolved or [],
+        status_filter=StatusFilter.NONE, unresolved_refs=unresolved or [], compare_queries=queries or [],
     )
 
 
@@ -29,6 +36,8 @@ SEARCH_DETAIL = Route(Handler.SEARCH, AnswerKind.DETAIL)
 DETAIL = Route(Handler.DETAIL, AnswerKind.DETAIL)
 SHORT = Route(Handler.SHORT, AnswerKind.SHORT)
 CLARIFY = Route(Handler.CLARIFY, AnswerKind.CLARIFY)
+COMPARE = Route(Handler.COMPARE, AnswerKind.COMPARE)
+COMPARE_LIMIT = Route(Handler.COMPARE, AnswerKind.CLARIFY)
 
 
 @pytest.mark.parametrize(
@@ -80,3 +89,37 @@ def test_job_or_school_mismatch_still_searches():
     conditions = SearchConditions(mismatches=[Mismatch("학력", "석·박사", "대학 졸업")])
 
     assert choose_route(_analysis(_sub(Intent.POLICY_LIST)), conditions) == SEARCH_RECOMMEND
+
+
+@pytest.mark.parametrize(
+    ("sub", "route"),
+    [
+        (_sub(Intent.COMPARISON, [RENT, MOVE]), COMPARE),
+        (_sub(Intent.COMPARISON, [RENT], queries=["청년도약계좌"]), COMPARE),
+        (_sub(Intent.COMPARISON, queries=["청년도약계좌", "내일저축계좌"]), COMPARE),
+        # 셋 이상은 어느 둘인지 짐작하지 않고 비교 핸들러가 되물음
+        (_sub(Intent.COMPARISON, [RENT, MOVE, LOAN]), COMPARE_LIMIT),
+        (_sub(Intent.COMPARISON, [RENT], queries=["청년도약계좌", "내일저축계좌"]), COMPARE_LIMIT),
+        # 대상이 하나뿐이면 지금처럼 지목은 상세, 이름만은 검색
+        (_sub(Intent.COMPARISON, queries=["청년도약계좌"]), SEARCH_RECOMMEND),
+        # 없는 카드 번호는 비교보다 먼저 되물음
+        (_sub(Intent.COMPARISON, [RENT], unresolved=["5"], queries=["청년도약계좌"]), CLARIFY),
+    ],
+)
+def test_comparison_routes(sub, route):
+    assert choose_route(_analysis(sub), SearchConditions()) == route
+
+
+@pytest.mark.parametrize(
+    ("sub", "route"),
+    [
+        # 지목하지 못한 대상은 프로필로 걸러 검색하므로 검색처럼 되물음
+        (_sub(Intent.COMPARISON, [RENT], queries=["청년도약계좌"]), CLARIFY),
+        (_sub(Intent.COMPARISON, queries=["청년도약계좌", "내일저축계좌"]), CLARIFY),
+        # 지목한 정책만 비교하거나 대상 수로 되묻는 경우는 검색하지 않음
+        (_sub(Intent.COMPARISON, [RENT, MOVE]), COMPARE),
+        (_sub(Intent.COMPARISON, queries=["A", "B", "C"]), COMPARE_LIMIT),
+    ],
+)
+def test_comparison_region_mismatch(sub, route):
+    assert choose_route(_analysis(sub), REGION_MISMATCH) == route

@@ -1,6 +1,14 @@
 from datetime import date
 
-from app.pipeline.cards import build_cards, local_first, pick_candidates
+import pytest
+
+from app.pipeline.cards import (
+    build_cards,
+    compare_card_numbers,
+    local_first,
+    pick_candidates,
+)
+from app.pipeline.evidence import CompareGroup
 from app.pipeline.grouping import PolicyGroup
 from app.repositories.policy_repository import PolicyRecord
 from app.schemas.analysis import Category
@@ -172,3 +180,35 @@ def test_category_bonus_lifts_same_category_policy():
 
     assert [c.policy_no for c in lifted] == ["OLD", "NEW"]
     assert [c.policy_no for c in plain] == ["JOB", "OLD"]
+
+
+# 지목 1개(1번) + 검색 대상 2개(2~4번, 5~7번)
+COMPARE_GROUPS = [
+    CompareGroup("청년 월세 지원", 1, fixed=True),
+    CompareGroup("청년도약계좌", 3, fixed=False),
+    CompareGroup("내일저축계좌", 3, fixed=False),
+]
+
+
+@pytest.mark.parametrize(
+    ("numbers", "expected"),
+    [
+        ([1, 3, 5], [1, 3, 5]),
+        # 지목한 정책은 LLM이 빼도 넣음
+        ([3, 5], [1, 3, 5]),
+        # 맞는 후보가 없어 고르지 않은 대상은 비워 둠
+        ([1, 3], [1, 3]),
+        # 한 대상에서 여럿을 고르면 그 대상의 1위
+        ([1, 3, 4, 6], [1, 2, 6]),
+        # 첫 줄 형식을 어기면 대상마다 1위
+        (None, [1, 2, 5]),
+    ],
+)
+def test_compare_card_numbers(numbers, expected):
+    assert compare_card_numbers(numbers, COMPARE_GROUPS) == expected
+
+
+def test_compare_card_numbers_skip_empty_group():
+    groups = [CompareGroup("청년도약계좌", 0, fixed=False), CompareGroup("내일저축계좌", 2, fixed=False)]
+
+    assert compare_card_numbers(None, groups) == [1]

@@ -33,14 +33,20 @@ class FakeLLM:
 
 
 def _sub(
-    question: str, refs: list[str], intent: Intent = Intent.POLICY_DETAIL, search_query: str = "", **conditions
+    question: str,
+    refs: list[str],
+    intent: Intent = Intent.POLICY_DETAIL,
+    search_query: str = "",
+    compare_queries: list[str] | None = None,
+    **conditions,
 ) -> SubQuery:
     values = {
         "region": "", "age": None, "job_status": JobStatus.NONE, "school": SchoolLevel.NONE,
         "category": Category.NONE, **conditions,
     }
     return SubQuery(
-        standalone_question=question, search_query=search_query, target_refs=refs, intent=intent,
+        standalone_question=question, search_query=search_query, target_refs=refs,
+        compare_queries=compare_queries or [], intent=intent,
         status_filter=StatusFilter.NONE, **values,
     )
 
@@ -210,7 +216,7 @@ async def test_trace_after_success():
     trace = (await analyzer.analyze(_ctx(inp, llm))).to_trace()
 
     assert json.loads(json.dumps(trace)) == {
-        "prompt_version": "analyze_v7",
+        "prompt_version": "analyze_v8",
         "model": "fake-analysis-model",
         "tokens": {"prompt": 100, "completion": 20},
         "sub_queries": [{
@@ -218,13 +224,14 @@ async def test_trace_after_success():
             "search_query": "청년 이사비 지원 신청 방법",
             "target_refs": ["2", "9"],
             "target_policy_nos": [MOVING.policy_no],
+            "compare_queries": [],
             "intent": "policy_detail",
             "status_filter": "none",
             "region": "",
             "age": 27,
             "job_status": "없음",
             "school": "없음",
-                "category": "없음",
+            "category": "없음",
         }],
         "is_new_topic": False,
         "fallback_reason": None,
@@ -239,3 +246,22 @@ async def test_trace_after_failure():
     assert trace["sub_queries"] == []
     assert trace["fallback_reason"] == "llm_error"
     assert trace["tokens"] == {"prompt": 0, "completion": 0}
+
+
+# 비교 대상 수가 라우팅 규칙이라 빈 값·중복만 정리하고 셋 이상이어도 남김
+async def test_compare_queries_cleaned_for_comparison():
+    llm = FakeLLM(_parsed(_sub(
+        "A, B, C 비교", [], Intent.COMPARISON, compare_queries=[" 청년도약계좌 ", "", "내일저축계좌", "청년도약계좌", "미래적금"]
+    )))
+
+    result = await analyzer.analyze(_ctx(PipelineInput(question="비교해 줘"), llm))
+
+    assert result.sub_queries[0].compare_queries == ["청년도약계좌", "내일저축계좌", "미래적금"]
+
+
+async def test_compare_queries_dropped_when_not_comparison():
+    llm = FakeLLM(_parsed(_sub("월세랑 이사비 알려줘", [], Intent.POLICY_LIST, compare_queries=["월세 지원", "이사비 지원"])))
+
+    result = await analyzer.analyze(_ctx(PipelineInput(question="월세랑 이사비 알려줘"), llm))
+
+    assert result.sub_queries[0].compare_queries == []

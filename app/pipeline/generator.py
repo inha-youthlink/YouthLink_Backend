@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from datetime import date
 
 from app.llm.client import ChatUsage
-from app.pipeline.cards import status_of
+from app.pipeline.cards import compare_card_numbers, status_of
 from app.pipeline.conditions import load_code_names, load_regions
 from app.pipeline.context import PipelineContext
-from app.pipeline.evidence import AnswerKind
+from app.pipeline.evidence import AnswerKind, CompareGroup
 from app.pipeline.grouping import PolicyGroup
 from app.pipeline.prompts import load_prompt
 from app.repositories.policy_repository import PolicyRecord
@@ -17,9 +17,14 @@ from app.schemas.policy_info import ApplicationStatus, clean_url
 COMMON_PROMPT = "answer_common_v2"
 # 카드를 LLM이 고를 때만 첫 줄 [소개: …] 형식을 붙임
 CARDS_PROMPT = "answer_cards_v2"
+# 비교는 "최대 3개"가 아니라 대상마다 하나를 골라 추천과 고르는 규칙이 다름
+COMPARE_CARDS_PROMPT = "answer_compare_cards_v1"
+# answer_compare_cards_v1의 규칙 문구와 같아야 함
+POINTED_MARK = "사용자가 가리킨 정책"
 KIND_PROMPTS = {
     AnswerKind.RECOMMEND: "answer_recommend_v1",
     AnswerKind.DETAIL: "answer_detail_v2",
+    AnswerKind.COMPARE: "answer_compare_v1",
 }
 # 근거가 없어 근거 사용 규칙이 담긴 공통 조각을 넣지 않음
 SHORT_PROMPT = "answer_short_v2"
@@ -100,8 +105,9 @@ async def generate_stream(ctx: PipelineContext) -> AsyncGenerator[GenerationEven
         contexts: list[str] = []
         user_message = f"[질문]\n{ctx.query}"
     else:
+        cards_prompt = COMPARE_CARDS_PROMPT if ctx.answer_kind == AnswerKind.COMPARE else CARDS_PROMPT
         prompt_names = [
-            COMMON_PROMPT, *([] if evidence.fixed_cards else [CARDS_PROMPT]), KIND_PROMPTS[ctx.answer_kind]
+            COMMON_PROMPT, *([] if evidence.fixed_cards else [cards_prompt]), KIND_PROMPTS[ctx.answer_kind]
         ]
         contexts = _format_evidence(evidence.candidates, evidence.policies, evidence.documents, ctx.today)
         user_message = await _user_message(ctx, contexts)
@@ -131,7 +137,7 @@ async def generate_stream(ctx: PipelineContext) -> AsyncGenerator[GenerationEven
                 decided = _decide_card_line(head, len(contexts))
                 if decided is None:
                     continue
-                waiting_card_line, numbers = False, decided.numbers
+                waiting_card_line, numbers = False, _checked_numbers(ctx, decided.numbers)
                 yield CardsDecided(numbers)
                 piece = decided.body
             text = body.feed(piece)
@@ -141,7 +147,7 @@ async def generate_stream(ctx: PipelineContext) -> AsyncGenerator[GenerationEven
     # 첫 줄 판단 전에 끝난 짧은 답변("[소개: 1]"만 있거나 줄바꿈 없는 한 줄)은 한 번에 받을 때와 같이 파싱함
     if waiting_card_line:
         card_line = parse_card_line(head, len(contexts))
-        numbers = card_line.numbers
+        numbers = _checked_numbers(ctx, card_line.numbers)
         yield CardsDecided(numbers)
         text = body.feed(card_line.body)
         if text:
@@ -203,9 +209,35 @@ async def _user_message(ctx: PipelineContext, contexts: list[str]) -> str:
     # 근거가 조건으로 걸러졌음을 알아야 프로필과 다른 조건을 안내하고, 결과가 없을 때 이유를 말할 수 있음
     if ctx.evidence.filtered and ctx.conditions and ctx.conditions.lines:
         sections.append("[검색 조건]\n" + "\n".join(ctx.conditions.lines))
-    evidence = "\n\n".join(contexts) if contexts else NO_EVIDENCE
+    groups = ctx.evidence.compare_groups
+    evidence = _compare_evidence(contexts, groups) if groups else "\n\n".join(contexts) or NO_EVIDENCE
     sections += [f"[근거]\n{evidence}", f"[질문]\n{ctx.query}"]
     return "\n\n".join(sections)
+
+
+# 근거만 보고는 어느 후보가 어느 대상의 것인지 알 수 없어 대상별 머리말로 나눔. 근거 블록(contexts)은 그대로 둠
+# 검색한 대상도 후보가 하나뿐일 수 있어, 고를 필요 없는 지목 대상은 후보 수가 아니라 표시로 알림
+def _compare_evidence(contexts: list[str], groups: list[CompareGroup]) -> str:
+    parts = []
+    start = 0
+    for order, group in enumerate(groups, start=1):
+        blocks = contexts[start:start + group.size]
+        mark = f" ({POINTED_MARK})" if group.fixed else ""
+        head = f"[비교 대상 {order}: {group.name}{mark}]"
+        parts.append("\n\n".join([head, *blocks]) if blocks else f"{head}\n{NO_EVIDENCE}")
+        start += group.size
+    return "\n\n".join(parts)
+
+
+# 비교가 아니면 그대로 둠. 고친 경우는 평가에서 LLM이 규칙을 얼마나 어기는지 보려고 남김
+def _checked_numbers(ctx: PipelineContext, numbers: list[int] | None) -> list[int] | None:
+    groups = ctx.evidence.compare_groups
+    if not groups:
+        return numbers
+    checked = compare_card_numbers(numbers, groups)
+    if checked != numbers:
+        ctx.trace.setdefault("compare", {})["card_line_fixed"] = True
+    return checked
 
 
 def parse_card_line(text: str, candidate_count: int) -> CardLine:

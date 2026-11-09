@@ -1,5 +1,6 @@
 from datetime import date
 
+from app.pipeline.evidence import CompareGroup
 from app.pipeline.grouping import PolicyGroup
 from app.repositories.policy_repository import PolicyRecord
 from app.schemas.analysis import Category
@@ -78,3 +79,19 @@ def build_cards(
         for group in chosen
         if (policy := policies.get(group.policy_no)) is not None
     ]
+
+
+# 비교 카드는 대상마다 0~1개. 지목한 정책은 항상 넣고, 한 대상에서 여럿을 고르거나 첫 줄 형식을 어기면 그 대상의 1위를 씀
+def compare_card_numbers(numbers: list[int] | None, groups: list[CompareGroup]) -> list[int]:
+    chosen: list[int] = []
+    start = 1
+    for group in groups:
+        span = list(range(start, start + group.size))
+        picked = [number for number in (numbers or []) if number in span]
+        if group.fixed:
+            picked = span
+        elif numbers is None or len(picked) > 1:
+            picked = span[:1]
+        chosen += picked
+        start += group.size
+    return chosen
