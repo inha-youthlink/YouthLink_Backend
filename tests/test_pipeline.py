@@ -34,7 +34,7 @@ class FakeLLM:
 
     def __init__(self, intent: Intent, refs: list[str], answer: str, region: str = "") -> None:
         self._sub = SubQuery(
-            standalone_question="질문", search_query="청년 주거 지원", target_refs=refs, intent=intent,
+            standalone_question="질문", search_query="청년 주거 지원", target_refs=refs, compare_queries=[], intent=intent,
             status_filter=StatusFilter.NONE, region=region, age=None, job_status=JobStatus.NONE, school=SchoolLevel.NONE,
             category=Category.NONE,
         )

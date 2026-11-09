@@ -62,6 +62,8 @@ class SubQuery(BaseModel):
     search_query: str
     # 긴 policy_no를 잘못 옮겨 쓰는 오류를 피하려고 프롬프트 후보 표기("2", "C1")를 받음
     target_refs: list[str]
+    # 후보로 가리키지 못한 비교 대상. 비교 핸들러가 대상마다 따로 검색함
+    compare_queries: list[str]
     intent: Intent
     status_filter: StatusFilter
     # 질문에서 사용자가 직접 말한 조건. 말하지 않았으면 "", null, "없음"
