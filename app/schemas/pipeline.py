@@ -91,4 +91,6 @@ PUBLIC_TRACE_KEYS = frozenset({
     "cards",
     "conditions",
     "clarify_reason",
+    # 비교 대상별 검색어와 후보 번호. 근거 원문은 없어 cards와 같은 수준
+    "compare",
 })

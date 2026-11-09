@@ -23,7 +23,7 @@ class _Found:
     ranked: list[PolicyGroup]
     policies: dict[str, PolicyRecord]
     chunks: list[Chunk]
-    name_match_count: int
+    name_nos: list[str]
 
 
 async def collect(ctx: PipelineContext) -> Evidence:
@@ -47,20 +47,33 @@ async def collect(ctx: PipelineContext) -> Evidence:
         if no in target_records:
             candidates.append(PolicyGroup(no, NO_SCORE, []))
             groups.append(CompareGroup(target_records[no].policy_name, 1, fixed=True))
-    # 같은 정책이 두 대상의 후보에 함께 있으면 LLM이 같은 정책끼리 비교할 수 있어 앞 대상에만 둠
+    # 같은 정책이 두 대상의 후보에 함께 있으면 LLM이 같은 정책끼리 비교할 수 있어 한 대상에만 둠
+    # 이름이 같고 번호만 다른 정책(연도·기관별 재등록)도 같은 정책으로 봄
     used = {group.policy_no for group in candidates}
+    used_names = {target_records[no].policy_name for no in used}
     policies = dict(target_records)
     query_traces = []
-    for query, result in zip(sub.compare_queries, found):
-        picked = [group for group in result.ranked if group.policy_no not in used][:CANDIDATES_PER_TARGET]
+    for index, (query, result) in enumerate(zip(sub.compare_queries, found)):
+        # 다른 대상의 이름과 일치한 정책은 그 대상의 것이라, 벡터로 먼저 걸린 앞 대상이 가져가지 않게 함
+        claimed = {
+            result_other.policies[no].policy_name
+            for other, result_other in enumerate(found) if other != index
+            for no in result_other.name_nos
+        } - {result.policies[no].policy_name for no in result.name_nos}
+        excluded = used_names | claimed
+        picked = [
+            group for group in result.ranked
+            if group.policy_no not in used and result.policies[group.policy_no].policy_name not in excluded
+        ][:CANDIDATES_PER_TARGET]
         used.update(group.policy_no for group in picked)
+        used_names.update(result.policies[group.policy_no].policy_name for group in picked)
         candidates += picked
         groups.append(CompareGroup(query, len(picked), fixed=False))
         policies.update(result.policies)
         query_traces.append({
             "query": query,
             "candidate_nos": [group.policy_no for group in picked],
-            "name_match_count": result.name_match_count,
+            "name_match_count": len(result.name_nos),
         })
     candidate_nos = [group.policy_no for group in candidates]
     documents = await repository.get_documents(candidate_nos)
@@ -128,7 +141,7 @@ async def _search(ctx: PipelineContext, query: str, policy_ids: list[str] | None
         if name not in names:
             names.add(name)
             ranked.append(group)
-    return _Found(ranked=ranked, policies=policies, chunks=chunks, name_match_count=len(name_nos))
+    return _Found(ranked=ranked, policies=policies, chunks=chunks, name_nos=name_nos)
 
 
 # 대상이 셋 이상이면 어느 둘인지 짐작하지 않고 되물음. 모두 지목했으면 그 정책들을 보기 카드로 둠

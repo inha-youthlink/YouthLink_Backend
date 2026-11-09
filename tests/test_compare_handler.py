@@ -57,7 +57,7 @@ def _chunk(policy_no: str, score: float) -> Chunk:
 # "도약계좌"처럼 줄인 이름은 벡터가 정식 이름 정책을 놓치는 경우를 흉내 냄
 VECTOR_RESULTS = {
     "도약계좌": [("P-JOB", 0.8), ("P-CAMP", 0.7), ("P-DEPOSIT", 0.6), ("P-CLOSED", 0.59)],
-    "내일저축계좌": [("P-DEPOSIT", 0.9), ("P-SAVE", 0.8), ("P-DEPOSIT2", 0.7), ("P-JOB", 0.6)],
+    "내일저축계좌": [("P-DEPOSIT", 0.9), ("P-SAVE", 0.8), ("P-DEPOSIT2", 0.7), ("P-JOB", 0.6), ("P-OLD", 0.5)],
 }
 NAME_HITS = {"도약계좌": ["P-SAVE", "P-OLD"], "내일저축계좌": ["P-DEPOSIT", "P-DEPOSIT2"]}
 
@@ -166,7 +166,8 @@ async def test_name_matches_first_then_vector():
     assert evidence.filtered is True
 
 
-# 앞 대상의 후보는 뒤 대상에서 빼서 같은 정책끼리 비교하지 않음. 남는 후보가 적으면 그만큼만 둠
+# 앞 대상의 후보는 뒤 대상에서 빼서 같은 정책끼리 비교하지 않음. 번호만 다른 같은 이름(P-OLD)도 뺌
+# 남는 후보가 적으면 그만큼만 둠
 async def test_later_target_skips_policies_already_used():
     ctx = _ctx([], ["도약계좌", "내일저축계좌"])
 
@@ -239,3 +240,17 @@ async def test_too_many_with_names_asks_without_cards():
     ])
     assert evidence.candidates == []
     assert ctx.deps.retriever.calls == []
+
+
+# 뒤 대상의 이름과 일치한 정책(P-DEPOSIT)이 앞 대상의 벡터 결과에 먼저 걸려도 뒤 대상에 남김
+async def test_name_match_of_later_target_stays_there():
+    ctx = _ctx([], ["도약계좌", "내일저축계좌"])
+    VECTOR_RESULTS["도약계좌"].insert(0, ("P-DEPOSIT", 0.95))
+    try:
+        evidence = await compare.collect(ctx)
+    finally:
+        VECTOR_RESULTS["도약계좌"].pop(0)
+
+    nos = [group.policy_no for group in evidence.candidates]
+    assert nos[:3] == ["P-SAVE", "P-JOB", "P-CAMP"]
+    assert nos[3:] == ["P-DEPOSIT", "P-DEPOSIT2"]
