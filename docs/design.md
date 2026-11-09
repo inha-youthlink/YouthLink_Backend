@@ -267,7 +267,7 @@ POST /internal/pipeline   PipelineInput → PipelineOutput (저장 없음)
 | `POST/GET /api/sessions`, `GET /api/sessions/{id}`, `GET /api/sessions/{id}/messages` | 세션(카테고리 + 프로필 8항목), 목록, 단건, 메시지 이력 (카드 복원) |
 | `POST /api/sessions/{id}/chat` | 채팅 SSE: `token` / `policies` / `done` / `error`, 15초 `:ping`. `clientMessageId` 멱등 처리, 연결이 끊기면 생성 취소 |
 | `POST /api/sessions/{id}/summary`, `GET /api/sessions/{id}/recommendations` | 대화 요약 (LLM), 추천 정책 (1차 필터링 재사용) |
-| `GET /api/policies`, `GET /api/policies/{id}` | 정책 검색 (키워드·카테고리·지역, 페이지), 상세 |
+| `GET /api/policies`, `GET /api/policies/{id}` | 정책 검색 (키워드·카테고리·지역, 페이지. `sessionId`를 주면 지역 대신 세션 프로필로 1차 필터), 상세 |
 | `POST /api/sessions/{id}/guides` | 맞춤 신청 가이드 PDF (S3 presigned URL, 10분 이하 만료). 중간 시연은 mock 허용 |
 | `GET/POST/DELETE /api/scraps` | 스크랩 (멱등) |
 

@@ -1,3 +1,5 @@
+import asyncio
+import uuid
 from dataclasses import replace
 from datetime import date
 
@@ -13,9 +15,18 @@ from app.repositories.policy_repository import (
     PolicyRecord,
     RegionRow,
 )
+from app.schemas.pipeline import Profile
 from app.schemas.policy import RegionOption
 from app.services.policy_service import PolicyService
-from tests.conftest import HEADERS, REGIONS, FakePolicyRepository
+from tests.conftest import (
+    CLIENT_ID,
+    HEADERS,
+    OTHER_CLIENT_ID,
+    REGIONS,
+    FakeChatRepository,
+    FakeCodes,
+    FakePolicyRepository,
+)
 
 RECORD = PolicyRecord(
     policy_no="P-1",
@@ -78,8 +89,18 @@ def repo() -> SearchPolicyRepository:
 
 
 @pytest.fixture
-def client(repo):
-    app.dependency_overrides[get_policy_service] = lambda: PolicyService(repo)
+def chats() -> FakeChatRepository:
+    return FakeChatRepository()
+
+
+@pytest.fixture
+def codes() -> FakeCodes:
+    return FakeCodes()
+
+
+@pytest.fixture
+def client(repo, chats, codes):
+    app.dependency_overrides[get_policy_service] = lambda: PolicyService(repo, chats, codes)
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -132,7 +153,8 @@ MIXED_REGIONS = [
 # 목록의 코드는 세션 생성에서 받아지고, 그 코드로 거른 범위가 목록 항목의 시군구와 같아야 함
 async def test_region_codes_round_trip():
     regions = RegionIndex(MIXED_REGIONS)
-    groups = await PolicyService(SearchPolicyRepository([], 0, MIXED_REGIONS)).list_regions()
+    service = PolicyService(SearchPolicyRepository([], 0, MIXED_REGIONS), FakeChatRepository(), FakeCodes())
+    groups = await service.list_regions()
 
     options = {option.code: option.name for group in groups for option in group.sigungu}
     assert all(regions.is_profile_code(code) for code in options)
@@ -262,6 +284,89 @@ def test_search_requires_client_id(client):
 
     assert response.status_code == 400
     assert response.json()["code"] == "INVALID_CLIENT_ID"
+
+
+PROFILE = Profile(
+    age=27, region_code="11680", marriage_status_code="0055002", annual_income=30_000_000,
+    major_code="0011005", job_code="0013003", school_code="0049007", special_target_code="0014010",
+)
+
+
+@pytest.fixture
+def session_id(chats) -> uuid.UUID:
+    return asyncio.run(chats.create_room(CLIENT_ID, PROFILE))
+
+
+# 채팅방 안 검색: 지역 대신 세션 프로필로 1차 필터 (채팅·추천과 같은 조건) + 검색어·카테고리
+def test_session_search_uses_profile_filter(client, repo, session_id):
+    response = _search(client, sessionId=str(session_id), keyword="월세 지원", category="HOUSING", page=1, size=10)
+
+    assert response.status_code == 200
+    # 세션 프로필마다 결과가 달라 공용 캐시에 남기지 않음
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["items"][0]["id"] == "P-1"
+    policy_filter, offset, limit = repo.calls[0]
+    assert (offset, limit) == (10, 10)
+    assert policy_filter == PolicyFilter(
+        sido_code="11",
+        region_codes=("11680",),
+        age=27,
+        eligibility_codes={"JOB": "0013003", "SCHOOL": "0049007", "MAJOR": "0011005", "SPECIAL": "0014010"},
+        marriage_code="0055002",
+        annual_income_won=30_000_000,
+        # 정책 검색과 같게 마감·예정도 남김 (추천과 다름)
+        exclude_closed=False,
+        exclude_upcoming=False,
+        large_categories=("주거",),
+        keywords=("월세", "지원"),
+    )
+
+
+# 프로필 "기타" 코드는 채팅·추천처럼 거르지 않음
+def test_session_search_other_code_not_filtered(client, repo, codes, session_id):
+    codes.names["0013003"] = "기타"
+
+    _search(client, sessionId=str(session_id))
+
+    assert "JOB" not in repo.calls[0][0].eligibility_codes
+
+
+# 빈 값은 조건 없음: 빈 sessionId는 지금 검색 그대로, 빈 region은 세션과 함께 와도 됨
+def test_session_search_blank_values(client, repo, session_id):
+    blank_session = _search(client, sessionId="")
+    blank_region = _search(client, sessionId=str(session_id), region="")
+
+    assert blank_session.status_code == 200
+    assert "cache-control" not in blank_session.headers
+    assert blank_region.status_code == 200
+    assert repo.calls[0][0] == PolicyFilter()
+    assert repo.calls[1][0].region_codes == ("11680",)
+
+
+def test_session_search_rejects_region(client, repo, session_id):
+    response = _search(client, sessionId=str(session_id), region="11680")
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["code"] == "VALIDATION_FAILED"
+    assert [detail["field"] for detail in body["details"]] == ["region"]
+    assert repo.calls == []
+
+
+# 다른 사용자의 세션·없는 세션·UUID가 아닌 값은 세션 API처럼 모두 없는 세션
+@pytest.mark.parametrize("kind", ["other_user", "unknown", "not_uuid"])
+def test_session_search_not_found(client, repo, session_id, kind):
+    value, headers = {
+        "other_user": (str(session_id), {"X-Client-Id": OTHER_CLIENT_ID}),
+        "unknown": (str(uuid.uuid4()), HEADERS),
+        "not_uuid": ("room-1", HEADERS),
+    }[kind]
+
+    response = client.get("/api/policies", params={"sessionId": value}, headers=headers)
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "SESSION_NOT_FOUND"
+    assert repo.calls == []
 
 
 def test_policy_detail(client):

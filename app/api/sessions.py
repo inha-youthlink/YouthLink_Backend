@@ -13,8 +13,8 @@ from app.core.dependencies import (
     get_rate_limits,
     get_session_locks,
     limit_chat_requests,
+    parse_session_id,
 )
-from app.core.errors import SessionNotFoundError
 from app.core.rate_limit import RateLimits
 from app.core.session_lock import SessionLocks
 from app.core.sse import SSE_HEADERS, with_pings
@@ -64,17 +64,9 @@ def get_chat_service(
     return ChatService(chat_repository, pipeline_deps, session_locks)
 
 
-# UUID가 아닌 id도 계약상 "없는 세션"이라 검증 오류(400) 대신 404로 응답함
-def _session_id(session_id: str) -> UUID:
-    try:
-        return UUID(session_id)
-    except ValueError:
-        raise SessionNotFoundError from None
-
-
 Service = Annotated[ChatService, Depends(get_chat_service)]
 Assist = Annotated[AssistService, Depends(get_assist_service)]
-SessionId = Annotated[UUID, Depends(_session_id)]
+SessionId = Annotated[UUID, Depends(parse_session_id)]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

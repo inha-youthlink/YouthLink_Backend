@@ -65,6 +65,15 @@ class FakePolicyRepository:
         return REGIONS
 
 
+# 코드 이름 조회. 정하지 않은 코드는 "이름"으로 돌려줌
+class FakeCodes:
+    def __init__(self, names: dict[str, str] | None = None) -> None:
+        self.names = names or {}
+
+    async def get_names(self, codes):
+        return {code: self.names.get(code, "이름") for code in codes}
+
+
 # API 테스트용 메모리 저장소. 실제 SQL은 test_chat_repository가 테스트 DB로 확인함
 class FakeChatRepository:
     def __init__(self) -> None:

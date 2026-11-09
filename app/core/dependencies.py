@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from app.core.config import Settings, get_settings
-from app.core.errors import ForbiddenOriginError, InvalidClientIdError
+from app.core.errors import ForbiddenOriginError, InvalidClientIdError, SessionNotFoundError
 from app.core.rate_limit import RateLimitedError, RateLimits
 from app.core.session_lock import SessionLocks
 from app.llm.client import LLMClient
@@ -81,6 +81,14 @@ def get_client_id(x_client_id: Annotated[str | None, Header()] = None) -> str:
 
 
 ClientId = Annotated[str, Depends(get_client_id)]
+
+
+# UUID가 아닌 id도 계약상 "없는 세션"이라 검증 오류(400) 대신 404로 응답함. 경로와 쿼리(정책 검색)가 함께 씀
+def parse_session_id(session_id: str) -> UUID:
+    try:
+        return UUID(session_id)
+    except ValueError:
+        raise SessionNotFoundError from None
 
 
 # /internal은 평가 서버 전용이라 FastAPI 기본 오류 형식을 그대로 씀

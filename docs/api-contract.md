@@ -1,11 +1,11 @@
 # YouthLink 공개 API 계약
 
-- 버전: **v1.0** (2026-11-04)
+- 버전: **v1.1** (2026-11-09)
 - 범위: 브라우저(React) ↔ 백엔드(FastAPI) 공개 API `/api/*`. 평가 서버용 `/internal/*`은 다루지 않음
 - 이 문서 하나가 기준이다. 프론트 초안 v0.3(`YouthLink_Front/spec/api-contract.md`)을 함께 읽지 않아도 되게 모든 규칙을 적었다. 필드·타입은 서버의 OpenAPI 명세(`/docs`)로도 확인할 수 있다
 - 표시: **(나중)** = 형식은 확정, 구현은 아직
 
-## 0. 프론트가 바꿀 것 (v0.3 → v1.0)
+## 0. 프론트가 바꿀 것 (v0.3 → v1.1)
 
 프론트 코드(타입 `src/api/types.ts`, mock `src/mocks/`)가 v0.3 형식이라 아래를 맞춰야 한다. 백엔드는 바뀌는 동안 v0.3 값도 받는다 (7절).
 
@@ -36,6 +36,11 @@
 - [ ] 정렬 규칙이 v0.3과 다름: **진행 중 → 예정 → 상시 → 정보 없음 → 마감**. 스크랩 직후 화면에서 먼저 정렬하는 규칙(`features/scrap/api/queries.ts`)과 mock의 `byAvailability`를 서버와 같게 (4.4, 4.6)
 - [ ] 정책 검색 `region`은 지역 목록의 코드, `category`는 5개
 
+**채팅방 안 정책 검색 (v1.1)**
+- [ ] 채팅방 화면 상단 검색은 `GET /api/policies?sessionId=...`로 부름. 검색어(`keyword`)와 카테고리(`category`)만 고르고 **`region`은 보내지 않음** (보내면 400). 나머지 조건은 세션 프로필로 거름 (4.4)
+- [ ] 결과가 0건일 때 빈 화면 (예: "조건에 맞는 정책이 없어요. 검색어나 카테고리를 바꿔 보세요"). 프로필 필터에 검색어·카테고리가 겹쳐 0건이 자주 나올 수 있음
+- [ ] 결과는 "자격이 확인된 정책"이 아님 (1차 필터는 확실히 안 맞는 정책만 뺌). 화면 문구를 단정적으로 쓰지 않음
+
 **배포 뒤**
 - [ ] 배포 경로 SSE 확인: 뼈대 → 실제 RAG 순서로 확인하고 결과를 알려 줌 (6.3)
 
@@ -56,7 +61,7 @@
 
 - 없거나 UUID 형식이 아니면 `400 INVALID_CLIENT_ID`. 대문자·하이픈 없는 형태도 같은 ID로 받음
 - 세션·스크랩은 이 값으로 주인을 구분한다. 다른 사용자의 세션에 접근하면 존재를 숨기려고 `404 SESSION_NOT_FOUND`
-- 정책 검색·상세, 지역 목록은 형식만 확인한다 (사용자마다 응답이 같음)
+- 정책 검색·상세, 지역 목록은 형식만 확인한다 (사용자마다 응답이 같음). 단 `sessionId`를 준 정책 검색은 세션 API처럼 주인을 확인한다 (4.4)
 
 ### 1.3 날짜와 시간
 - 날짜 `YYYY-MM-DD` (예: `2026-09-30`). 신청 기간에 씀
@@ -111,7 +116,7 @@
 - 수치는 시연 전에 서버 설정으로 바뀔 수 있음 (형식은 그대로)
 
 ### 1.7 캐시와 보안 헤더
-- 사용자마다 다른 응답(세션 API 전체, 스크랩 목록)은 `Cache-Control: no-store`
+- 사용자마다 다른 응답(세션 API 전체, 스크랩 목록, `sessionId`를 준 정책 검색)은 `Cache-Control: no-store`
 - 모든 응답에 `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`
 
 ## 2. 코드 값
@@ -267,7 +272,7 @@ interface SidoRegions {
 | `GET /api/sessions/{sessionId}/recommendations` | 추천 정책 | 됨 |
 | `POST /api/sessions/{sessionId}/summary` | 대화 요약 | 됨 |
 | `POST /api/sessions/{sessionId}/guides` | 신청 가이드 PDF | **(나중)** |
-| `GET /api/policies` | 정책 검색 | 됨 |
+| `GET /api/policies` | 정책 검색 (`sessionId`를 주면 채팅방 안 검색) | 됨 |
 | `GET /api/policies/{policyId}` | 정책 상세 | 됨 |
 | `GET /api/regions` | 지역 목록 | 됨 |
 | `GET /api/scraps`, `POST /api/scraps`, `DELETE /api/scraps/{policyId}` | 스크랩 | 됨 |
@@ -320,13 +325,21 @@ interface SidoRegions {
 |---|---|
 | `keyword` | 앞뒤 공백을 지운 뒤 50자 이하. 띄어쓰기로 나눈 낱말이 **모두** 정책 이름·설명·키워드 중 한 곳에 있어야 걸림 (대소문자 무시) |
 | `category` | 2.1의 5개. 대분류가 여러 개인 정책은 하나라도 맞으면 걸림 (카드의 `category`는 첫 번째라 다를 수 있음) |
-| `region` | 지역 목록의 코드. 범위는 2.2 |
+| `region` | 지역 목록의 코드. 범위는 2.2. `sessionId`와 함께 쓸 수 없음 |
+| `sessionId` | 채팅방 안 검색 (v1.1). 아래 참고 |
 | `page`, `size` | `page` 0~10,000 (기본 0), `size` 1~50 (기본 20) |
 
 - 모두 선택. 빈 값(`keyword=`)은 조건 없음. 어기면 `400 VALIDATION_FAILED` (`details[].field`는 쿼리 이름)
+- **`sessionId`를 주면** (채팅방 화면 상단 검색)
+  - 그 세션의 **프로필로 1차 필터**를 건다. 채팅 답변·추천과 같은 조건(지역·나이·취업·학력·전공·특화·혼인·소득)이고, 확실히 안 맞는 정책만 뺀다
+  - `keyword`·`category`는 함께 쓸 수 있다. `region`을 함께 보내면 `400 VALIDATION_FAILED`(`field: "region"`). 빈 `region=`은 조건 없음이라 괜찮음
+  - 정렬·마감 포함·페이지는 아래 정책 검색과 같다. 추천(4.2)은 당장 신청할 수 있는 정책이 먼저라 순서가 다르다 (상시가 예정보다 앞, 마감 제외)
+  - 세션 주인이 아니거나, 없는 세션이거나, UUID 형식이 아니면 `404 SESSION_NOT_FOUND`
+  - 응답에 `Cache-Control: no-store`
+  - `sessionId` 없는 검색은 지금 그대로 (채팅방과 상관없는 정책 목록 화면)
 - 정렬: **진행 중 → 예정 → 상시 → 정보 없음 → 마감**
   - 진행 중은 마감 임박 순(마감일 없으면 뒤), 예정은 시작 임박 순, 마감은 최근 마감 순. 같은 그룹·같은 날짜는 최신 정책 먼저
-- 약 0.3~0.4초
+- 약 0.4초 (`sessionId` 검색은 0.4~0.5초)
 
 **`GET /api/policies/{policyId}`** → `200 PolicyDetail`
 - 없는 정책 `404 POLICY_NOT_FOUND`
@@ -522,3 +535,4 @@ data: {"messageId":"1234"}
 - v0.1~v0.4 (2026-10-25~26): 프론트 초안 v0.3에 대한 백엔드 검토. 시군구 지역과 지역 목록, 세션 분야 삭제, 조건 되묻기, 카드 `status`·`regionLabel`·`organization`, 상세 문구, 카드 번호, `policies`를 본문 앞에 보내기 제안. 오류 코드 추가
 - v0.5~v0.7 (2026-10-29~11-01): 잠정 계약 본문. 카테고리 5개, 프로필 코드 대응, 과도기 호환, 공개 API 전체 구현 (검색·상세·지역·스크랩·추천·요약)
 - **v1.0 (2026-11-04)**: 프론트 초안 없이 읽히는 단일 계약으로 정리. 구현 현황 문서(`front-sync.md`)를 합침. 새로 정함: 카드 최대 10개와 답변마다 1부터 번호, 답변 마크다운은 CommonMark 범위(표 없음), 가이드 PDF 형식 확정(v0.3 형식, 동기), 과도기 호환은 프론트 반영 뒤 삭제, 배포 경로 SSE 확인은 뼈대 → 실제 RAG 순서로 하고 둘 다 통과하면 뼈대 삭제
+- **v1.1 (2026-11-09)**: 정책 검색에 선택 쿼리 `sessionId` 추가 (채팅방 안 검색). 세션 프로필로 1차 필터, `keyword`·`category`만 함께 쓰고 `region`은 400. 정렬·페이지는 정책 검색 그대로
