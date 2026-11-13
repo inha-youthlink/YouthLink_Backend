@@ -1,11 +1,11 @@
 # YouthLink 공개 API 계약
 
-- 버전: **v1.1** (2026-11-09)
+- 버전: **v1.2** (2026-11-13)
 - 범위: 브라우저(React) ↔ 백엔드(FastAPI) 공개 API `/api/*`. 평가 서버용 `/internal/*`은 다루지 않음
 - 이 문서 하나가 기준이다. 프론트 초안 v0.3(`YouthLink_Front/spec/api-contract.md`)을 함께 읽지 않아도 되게 모든 규칙을 적었다. 필드·타입은 서버의 OpenAPI 명세(`/docs`)로도 확인할 수 있다
 - 표시: **(나중)** = 형식은 확정, 구현은 아직
 
-## 0. 프론트가 바꿀 것 (v0.3 → v1.1)
+## 0. 프론트가 바꿀 것 (v0.3 → v1.2)
 
 프론트 코드(타입 `src/api/types.ts`, mock `src/mocks/`)가 v0.3 형식이라 아래를 맞춰야 한다. 백엔드는 바뀌는 동안 v0.3 값도 받는다 (7절).
 
@@ -40,6 +40,11 @@
 - [ ] 채팅방 화면 상단 검색은 `GET /api/policies?sessionId=...`로 부름. 검색어(`keyword`)와 카테고리(`category`)만 고르고 **`region`은 보내지 않음** (보내면 400). 나머지 조건은 세션 프로필로 거름 (4.4)
 - [ ] 결과가 0건일 때 빈 화면 (예: "조건에 맞는 정책이 없어요. 검색어나 카테고리를 바꿔 보세요"). 프로필 필터에 검색어·카테고리가 겹쳐 0건이 자주 나올 수 있음
 - [ ] 결과는 "자격이 확인된 정책"이 아님 (1차 필터는 확실히 안 맞는 정책만 뺌). 화면 문구를 단정적으로 쓰지 않음
+
+**채팅방 삭제 (v1.2)**
+- [ ] 채팅방 목록에서 삭제는 `DELETE /api/sessions/{sessionId}`. `204`면 목록에서 빼고, `404`(이미 지움 등)도 목록에서 빼면 됨 (4.1)
+- [ ] 되돌릴 수 없음 (메시지까지 모두 지워짐). 삭제 전에 확인 창을 띄움. 스크랩은 채팅방과 무관해 남음
+- [ ] 지금 보던 채팅방을 지웠으면 목록이나 새 대화 화면으로 이동
 
 **배포 뒤**
 - [ ] 배포 경로 SSE 확인: 뼈대 → 실제 RAG 순서로 확인하고 결과를 알려 줌 (6.3)
@@ -267,6 +272,7 @@ interface SidoRegions {
 | `POST /api/sessions` | 세션 만들기 | 됨 |
 | `GET /api/sessions` | 내 세션 목록 | 됨 |
 | `GET /api/sessions/{sessionId}` | 세션 하나 | 됨 |
+| `DELETE /api/sessions/{sessionId}` | 세션 삭제 (v1.2) | 됨 |
 | `GET /api/sessions/{sessionId}/messages` | 메시지 이력 | 됨 |
 | `POST /api/sessions/{sessionId}/chat` | 채팅 (SSE, 5절) | 됨 |
 | `GET /api/sessions/{sessionId}/recommendations` | 추천 정책 | 됨 |
@@ -299,6 +305,12 @@ interface SidoRegions {
 - 만든 시각 내림차순. 페이지네이션 없음
 
 **`GET /api/sessions/{sessionId}`** → `200 ChatSession`
+- 채팅방 화면의 프로필 표시도 이 응답(또는 목록)의 `profile`을 씀. 프로필을 바꾸는 API는 없음
+
+**`DELETE /api/sessions/{sessionId}`** → `204` (v1.2)
+- 본문 없음. 세션과 그 메시지·카드·현재 정책이 **모두 지워지고 되돌릴 수 없음**. 스크랩은 사용자 단위라 남음
+- 없거나 이미 지운 세션, 다른 사용자의 세션은 `404 SESSION_NOT_FOUND`
+- 답변 생성 중에 지우면 그 스트림은 `error` 이벤트(`INTERNAL_ERROR`)로 끝날 수 있음
 
 **`GET /api/sessions/{sessionId}/messages`** → `200 Message[]`
 - 오래된 순. 답변에는 그때의 카드(`policies`)가 함께 옴 (상태는 지금 기준, 3.2)
@@ -539,3 +551,4 @@ data: {"messageId":"1234"}
 - **v1.0 (2026-11-04)**: 프론트 초안 없이 읽히는 단일 계약으로 정리. 구현 현황 문서(`front-sync.md`)를 합침. 새로 정함: 카드 최대 10개와 답변마다 1부터 번호, 답변 마크다운은 CommonMark 범위(표 없음), 가이드 PDF 형식 확정(v0.3 형식, 동기), 과도기 호환은 프론트 반영 뒤 삭제, 배포 경로 SSE 확인은 뼈대 → 실제 RAG 순서로 하고 둘 다 통과하면 뼈대 삭제
 - **v1.1 (2026-11-09)**: 정책 검색에 선택 쿼리 `sessionId` 추가 (채팅방 안 검색). 세션 프로필로 1차 필터, `keyword`·`category`만 함께 쓰고 `region`은 400. 정렬·페이지는 정책 검색 그대로
   - 보충 (11-09, 형식 변경 없음): 정책 비교 동작 (5.3). 두 정책까지, 카드는 비교한 정책만, 셋 이상은 되물음
+- **v1.2 (2026-11-13)**: 세션 삭제 `DELETE /api/sessions/{sessionId}` 추가 (완전 삭제, `204`, 없으면 `404`). 채팅방 프로필 표시는 기존 세션 응답의 `profile`을 쓴다고 적음
