@@ -71,6 +71,11 @@ class ChatService:
     async def get_session(self, room_id: UUID, client_id: str) -> ChatSession:
         return _chat_session(await self._get_owned_room(room_id, client_id))
 
+    # 없는 방과 다른 사용자의 방을 같은 404로 숨김. 답변 생성 중이면 그 답변은 저장에 실패하고 로그만 남김
+    async def delete_session(self, room_id: UUID, client_id: str) -> None:
+        if not await self._chat_repository.delete_room(room_id, client_id):
+            raise SessionNotFoundError
+
     # 스트림을 시작하면 상태 코드를 바꿀 수 없어, 거절할 요청(세션 없음, 생성 중, 키 충돌, 하루 상한)은 여기서 JSON 오류로 끝냄
     # 돌려준 스트림은 SSE 이벤트 문자열을 내보내고, 끝나거나 끊기면 세션 잠금을 풂
     async def start_chat(

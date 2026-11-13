@@ -84,6 +84,11 @@ async def get_session(session_id: SessionId, client_id: ClientId, service: Servi
     return await service.get_session(session_id, client_id)
 
 
+@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT, responses=_NOT_FOUND)
+async def delete_session(session_id: SessionId, client_id: ClientId, service: Service) -> None:
+    await service.delete_session(session_id, client_id)
+
+
 @router.get("/{session_id}/messages", responses=_NOT_FOUND)
 async def list_messages(session_id: SessionId, client_id: ClientId, service: Service) -> list[Message]:
     return await service.list_messages(session_id, client_id)

@@ -187,6 +187,32 @@ def test_unknown_session_id(client, session_id):
     assert response.json()["code"] == "SESSION_NOT_FOUND"
 
 
+def test_delete_session(client, repo):
+    created = _create(client)
+    kept = _create(client)
+
+    response = client.delete(f"/api/sessions/{created['id']}", headers=HEADERS)
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert client.get(f"/api/sessions/{created['id']}", headers=HEADERS).status_code == 404
+    assert [session["id"] for session in client.get("/api/sessions", headers=HEADERS).json()] == [kept["id"]]
+
+
+# 이미 지운 방, 잘못된 ID, 다른 사용자의 방 모두 같은 404 (다른 사용자의 방은 지우지 않음)
+def test_delete_session_not_found(client, repo):
+    created = _create(client)
+    others = _create(client, headers={"X-Client-Id": OTHER_CLIENT_ID})
+    client.delete(f"/api/sessions/{created['id']}", headers=HEADERS)
+
+    for session_id in [created["id"], "not-a-uuid", others["id"]]:
+        response = client.delete(f"/api/sessions/{session_id}", headers=HEADERS)
+
+        assert response.status_code == 404
+        assert response.json() == {"code": "SESSION_NOT_FOUND", "message": "세션을 찾을 수 없습니다."}
+    assert uuid.UUID(others["id"]) in repo.rooms
+
+
 def test_list_messages(client, repo):
     created = _create(client)
     room_id = uuid.UUID(created["id"])
