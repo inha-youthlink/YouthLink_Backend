@@ -142,6 +142,13 @@ VALUES (:room_id, :policy_no, :display_order)
 """)
 
 # 제목은 첫 질문으로만 정하고, 이후에는 바뀌지 않아 목록에서 같은 채팅방을 찾기 쉬움
+# 주인 조건을 함께 걸어 확인과 삭제 사이에 다른 요청이 끼어들 틈을 없앰
+# 하위 채팅 테이블(프로필·메시지·정책 참조·현재 정책)은 FK ON DELETE CASCADE로 함께 지워짐
+_DELETE_ROOM_SQL = text("""
+DELETE FROM chat_room
+WHERE room_id = :room_id AND user_id = :user_id
+""")
+
 _TOUCH_ROOM_SQL = text("""
 UPDATE chat_room
 SET updated_at = NOW(),
@@ -191,6 +198,12 @@ class ChatRepository:
         async with self._session_factory() as session:
             result = await session.execute(_LIST_ROOMS_SQL, {"user_id": user_id})
             return [_room_record(row) for row in result.mappings()]
+
+    # 지웠으면 True. 없거나 다른 사용자의 방이면 False
+    async def delete_room(self, room_id: UUID, user_id: str) -> bool:
+        async with self._session_factory() as session, session.begin():
+            result = await session.execute(_DELETE_ROOM_SQL, {"room_id": room_id, "user_id": user_id})
+        return result.rowcount > 0
 
     async def list_messages(self, room_id: UUID) -> list[MessageItem]:
         async with self._session_factory() as session:

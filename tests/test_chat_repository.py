@@ -208,25 +208,38 @@ async def test_save_answer_rolls_back_on_failure(chat_repository):
     assert [m.content for m in messages] == ["질문1", "질문1 답변", "질문2"]
 
 
-# 회원 탈퇴 시 채팅방 삭제 한 번으로 하위 데이터가 모두 지워지는 전제를 확인함
+# 채팅방 삭제 한 번으로 하위 데이터가 모두 지워지는 전제를 확인함 (다른 방은 남음)
 async def test_delete_room_cascades(chat_repository, session_factory):
     room_id = await chat_repository.create_room(USER_ID, Profile(age=30))
-    await _save_turn(
-        chat_repository, room_id, "질문",
-        policies=[_policy(TEST_POLICY_NOS[0], 0.5)], current_policies=[_ref(TEST_POLICY_NOS[0])],
-    )
+    other_id = await chat_repository.create_room(USER_ID, Profile(age=30))
+    for room in (room_id, other_id):
+        await _save_turn(
+            chat_repository, room, "질문",
+            policies=[_policy(TEST_POLICY_NOS[0], 0.5)], current_policies=[_ref(TEST_POLICY_NOS[0])],
+        )
 
-    async with session_factory() as session, session.begin():
-        await session.execute(text("DELETE FROM chat_room WHERE room_id = :room_id"), {"room_id": room_id})
+    assert await chat_repository.delete_room(room_id, USER_ID) is True
 
+    assert await chat_repository.get_room(room_id) is None
     async with session_factory() as session:
         result = await session.execute(text("""
-            SELECT (SELECT count(*) FROM chat_profile)
-                 + (SELECT count(*) FROM chat_message)
-                 + (SELECT count(*) FROM message_policy_ref)
-                 + (SELECT count(*) FROM chat_current_policy)
-        """))
+            SELECT (SELECT count(*) FROM chat_profile WHERE room_id = :room_id)
+                 + (SELECT count(*) FROM chat_message WHERE room_id = :room_id)
+                 + (SELECT count(*) FROM message_policy_ref r
+                    WHERE NOT EXISTS (SELECT 1 FROM chat_message m WHERE m.message_id = r.message_id))
+                 + (SELECT count(*) FROM chat_current_policy WHERE room_id = :room_id)
+        """), {"room_id": room_id})
         assert result.scalar_one() == 0
+    assert len(await chat_repository.list_messages(other_id)) == 2
+    assert [p.policy_no for p in await chat_repository.list_current_policies(other_id)] == [TEST_POLICY_NOS[0]]
+
+
+async def test_delete_room_only_own_and_existing(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+
+    assert await chat_repository.delete_room(room_id, "other-user") is False
+    assert await chat_repository.delete_room(uuid.uuid4(), USER_ID) is False
+    assert await chat_repository.get_room(room_id) is not None
 
 
 async def test_recent_turns_keep_latest_in_time_order(chat_repository):

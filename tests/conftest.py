@@ -100,6 +100,15 @@ class FakeChatRepository:
         rooms = [room for room in self.rooms.values() if room.user_id == user_id]
         return sorted(rooms, key=lambda room: room.created_at, reverse=True)
 
+    async def delete_room(self, room_id: uuid.UUID, user_id: str) -> bool:
+        room = self.rooms.get(room_id)
+        if room is None or room.user_id != user_id:
+            return False
+        del self.rooms[room_id]
+        self.messages.pop(room_id, None)
+        self.current.pop(room_id, None)
+        return True
+
     async def list_messages(self, room_id: uuid.UUID) -> list[MessageItem]:
         return self.messages.get(room_id, [])
 
