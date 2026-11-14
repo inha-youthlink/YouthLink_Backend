@@ -1,11 +1,11 @@
 # YouthLink 공개 API 계약
 
-- 버전: **v1.2** (2026-11-13)
+- 버전: **v1.3** (2026-11-14)
 - 범위: 브라우저(React) ↔ 백엔드(FastAPI) 공개 API `/api/*`. 평가 서버용 `/internal/*`은 다루지 않음
 - 이 문서 하나가 기준이다. 프론트 초안 v0.3(`YouthLink_Front/spec/api-contract.md`)을 함께 읽지 않아도 되게 모든 규칙을 적었다. 필드·타입은 서버의 OpenAPI 명세(`/docs`)로도 확인할 수 있다
 - 표시: **(나중)** = 형식은 확정, 구현은 아직
 
-## 0. 프론트가 바꿀 것 (v0.3 → v1.2)
+## 0. 프론트가 바꿀 것 (v0.3 → v1.3)
 
 프론트 코드(타입 `src/api/types.ts`, mock `src/mocks/`)가 v0.3 형식이라 아래를 맞춰야 한다. 백엔드는 바뀌는 동안 v0.3 값도 받는다 (7절).
 
@@ -45,6 +45,12 @@
 - [ ] 채팅방 목록에서 삭제는 `DELETE /api/sessions/{sessionId}`. `204`면 목록에서 빼고, `404`(이미 지움 등)도 목록에서 빼면 됨 (4.1)
 - [ ] 되돌릴 수 없음 (메시지까지 모두 지워짐). 삭제 전에 확인 창을 띄움. 스크랩은 채팅방과 무관해 남음
 - [ ] 지금 보던 채팅방을 지웠으면 목록이나 새 대화 화면으로 이동
+
+**신청 가이드 PDF (v1.3)**
+- [ ] mock 대신 `POST /api/sessions/{sessionId}/guides`. 요청·응답 형식은 그대로 (4.7)
+- [ ] `pdfUrl`은 **같은 출처 경로**(`/api/guides/….pdf`). 받으면 바로 새 탭으로 열거나 내려받음. 10분 뒤 만료되니 저장해 두지 않고, 다시 볼 때는 같은 요청을 다시 보냄
+- [ ] 만드는 데 **10~20초**쯤 걸림 (LLM 호출). 버튼을 누르면 로딩 표시, 응답 전까지 같은 버튼 중복 클릭 막기
+- [ ] `429`·`502`·`504`가 올 수 있음. `message`를 그대로 보여 주면 됨
 
 **배포 뒤**
 - [ ] 배포 경로 SSE 확인: 뼈대 → 실제 RAG 순서로 확인하고 결과를 알려 줌 (6.3)
@@ -91,6 +97,7 @@
 | 403 | `FORBIDDEN` | Vercel을 거치지 않은 요청 (출처 확인을 켰을 때만, 6.2) |
 | 404 | `SESSION_NOT_FOUND` | 없는 세션, 다른 사용자의 세션, UUID가 아닌 세션 id |
 | 404 | `POLICY_NOT_FOUND` | 없는 정책, 비활성 정책 |
+| 404 | `GUIDE_NOT_FOUND` | 만료되었거나 없는 가이드 PDF 링크 (4.7) |
 | 404 | `NOT_FOUND` | 없는 경로 |
 | 405 | `METHOD_NOT_ALLOWED` | 허용되지 않는 메서드 |
 | 409 | `STREAM_IN_PROGRESS` | 같은 세션에서 답변을 만드는 중 (5.4) |
@@ -113,11 +120,11 @@
 | 대상 | 기준 |
 |---|---|
 | `/api/*` 전체 | IP(`X-Forwarded-For` 첫 값)당 분당 300회 |
-| 채팅, 대화 요약 | 위에 더해 IP당 분당 60회 + `X-Client-Id`당 분당 10회 |
-| 서버 전체 LLM 호출 (채팅, 요약) | 하루 1,000회 |
+| 채팅, 대화 요약, 신청 가이드 | 위에 더해 IP당 분당 60회 + `X-Client-Id`당 분당 10회 |
+| 서버 전체 LLM 호출 (채팅, 요약, 가이드) | 하루 1,000회 |
 
 - 넘으면 `429 RATE_LIMITED` + `Retry-After`(초)
-- 하루 상한은 `message`가 다르다: "오늘 이용량이 많아 채팅을 잠시 멈췄어요. 내일 다시 이용해 주세요." (`Retry-After`는 한국 자정까지). 대화 요약도 같은 문구
+- 하루 상한은 `message`가 다르다: "오늘 이용량이 많아 채팅을 잠시 멈췄어요. 내일 다시 이용해 주세요." (`Retry-After`는 한국 자정까지). 대화 요약·신청 가이드도 같은 문구
 - 수치는 시연 전에 서버 설정으로 바뀔 수 있음 (형식은 그대로)
 
 ### 1.7 캐시와 보안 헤더
@@ -277,7 +284,8 @@ interface SidoRegions {
 | `POST /api/sessions/{sessionId}/chat` | 채팅 (SSE, 5절) | 됨 |
 | `GET /api/sessions/{sessionId}/recommendations` | 추천 정책 | 됨 |
 | `POST /api/sessions/{sessionId}/summary` | 대화 요약 | 됨 |
-| `POST /api/sessions/{sessionId}/guides` | 신청 가이드 PDF | **(나중)** |
+| `POST /api/sessions/{sessionId}/guides` | 신청 가이드 PDF 만들기 | 구현 중 (v1.3) |
+| `GET /api/guides/{token}.pdf` | 만든 PDF 받기 (`pdfUrl`) | 구현 중 (v1.3) |
 | `GET /api/policies` | 정책 검색 (`sessionId`를 주면 채팅방 안 검색) | 됨 |
 | `GET /api/policies/{policyId}` | 정책 상세 | 됨 |
 | `GET /api/regions` | 지역 목록 | 됨 |
@@ -387,20 +395,35 @@ interface SidoRegions {
 - 비활성 정책의 스크랩은 지우지 않고 목록에서만 뺌 (다시 활성이 되면 돌아옴)
 - 스크랩 개수 상한 없음
 
-### 4.7 신청 가이드 PDF `POST /api/sessions/{sessionId}/guides` (나중)
-형식은 확정, 구현 전까지 프론트 mock 유지.
+### 4.7 신청 가이드 PDF `POST /api/sessions/{sessionId}/guides` (v1.3, 구현 중)
 ```json
 // 요청
 { "policyId": "20251031005400211234" }
 // 응답 201
 { "policyId": "20251031005400211234",
-  "pdfUrl": "https://…/guides/….pdf",
-  "expiresAt": "2026-11-04T18:10:00+09:00" }
+  "pdfUrl": "/api/guides/Xk3…Qz.pdf",
+  "expiresAt": "2026-11-14T18:10:00+09:00" }
 ```
-- 동기 처리 (응답이 올 때 PDF가 만들어져 있음)
-- `pdfUrl`은 **10분 이하**로 만료되는 링크. 만료되면 같은 요청으로 다시 받음 (PDF에 프로필 같은 민감 정보가 들어갈 수 있어서)
-- 오류: 없는 세션 `404 SESSION_NOT_FOUND`, 없는 정책 `404 POLICY_NOT_FOUND`, 요청 제한 `429`. PDF 내용을 LLM으로 만들면 LLM 실패 `502 RAG_UPSTREAM_ERROR`·시간 초과 `504 RAG_TIMEOUT`, 그 밖의 생성 실패는 `500 INTERNAL_ERROR`. 어느 경우든 `message`를 그대로 보여 주면 됨
-- PDF에 넣을 항목과 저장 위치는 구현할 때 백엔드가 정함 (API 형식은 바뀌지 않음)
+- 동기 처리 (응답이 올 때 PDF가 만들어져 있음). LLM을 한 번 불러 보통 10~20초
+- `pdfUrl`은 **같은 출처 경로**. Vercel rewrites(`/api/*`)를 그대로 거치므로 프론트 주소 기준으로 열면 됨 (6.1)
+- `pdfUrl`은 **10분** 뒤 만료. 만료되면 같은 요청으로 다시 받음 (PDF에 프로필·대화 내용이 들어가서). 저장하지 않으므로 다시 만들 때마다 LLM을 부름
+- 오류: 없는 세션 `404 SESSION_NOT_FOUND`, 없는 정책·비활성 정책 `404 POLICY_NOT_FOUND`, `policyId` 형식 오류 `400 VALIDATION_FAILED`, 요청 제한·하루 상한 `429 RATE_LIMITED` (채팅과 같은 기준, 1.6), LLM 실패 `502 RAG_UPSTREAM_ERROR`, 시간 초과 `504 RAG_TIMEOUT`, 그 밖의 생성 실패 `500 INTERNAL_ERROR`. 어느 경우든 `message`를 그대로 보여 주면 됨
+
+**PDF 받기 `GET /api/guides/{token}.pdf`** → `200 application/pdf`
+- 브라우저가 링크로 바로 여는 주소라 `X-Client-Id`가 **필요 없음**. 추측할 수 없는 토큰이 열쇠 역할
+- `Content-Disposition: inline` (브라우저 PDF 뷰어로 열림, 파일 이름은 정책 이름). `Cache-Control: no-store`
+- 만료되었거나 없는 토큰은 `404 GUIDE_NOT_FOUND` ("가이드 링크가 만료되었어요. 가이드를 다시 만들어 주세요.")
+
+**PDF 내용** (형식이 아니라 참고용. 바뀌어도 API는 그대로)
+1. 정책 이름, 기관, 신청 상태·기간, 관련 사이트
+2. 내 상황: 세션 프로필 + 대화에서 사용자가 직접 말한 사항
+3. 확인할 조건: 공고의 자격 조건 목록 (자격 판정은 하지 않음)
+4. 신청 방법 단계 표 (단계 | 할 일 | 어디서)
+5. 제출 서류 체크리스트 (+ 공고 원문)
+6. 주의사항
+7. 용어 설명 (공고에 나온 용어만)
+8. 안내: 자동으로 만든 참고 자료이므로 공고 원문과 담당 기관에서 확인할 것, 정보 기준일, 만든 시각
+- 날짜·금액·링크·기관명은 공고 데이터에서 그대로 넣음. 공고에 없는 항목은 "공고에 나와 있지 않음"과 문의처
 
 ## 5. 채팅 스트리밍 `POST /api/sessions/{sessionId}/chat`
 
@@ -539,7 +562,7 @@ data: {"messageId":"1234"}
 ## 8. 남은 일
 | 항목 | 상태 |
 |---|---|
-| 신청 가이드 PDF | 형식 확정 (4.7), 구현 전 |
+| 신청 가이드 PDF | 형식 확정 (4.7, v1.3), 구현 중 |
 | 서버 주소 | 인프라 배포 뒤 (6.1) |
 | 배포 경로 SSE 확인 | 서버가 뜨면 뼈대 → 실제 RAG 순서로 확인하고, 둘 다 통과하면 뼈대 삭제 (6.3) |
 | 개수 지정("5개 알려줘", "더 알려줘")·복합 질문 답변 | 형식은 이 문서대로 (5.3), 답변 동작은 구현 중. 정책 비교는 구현됨 (5.3) |
@@ -552,3 +575,4 @@ data: {"messageId":"1234"}
 - **v1.1 (2026-11-09)**: 정책 검색에 선택 쿼리 `sessionId` 추가 (채팅방 안 검색). 세션 프로필로 1차 필터, `keyword`·`category`만 함께 쓰고 `region`은 400. 정렬·페이지는 정책 검색 그대로
   - 보충 (11-09, 형식 변경 없음): 정책 비교 동작 (5.3). 두 정책까지, 카드는 비교한 정책만, 셋 이상은 되물음
 - **v1.2 (2026-11-13)**: 세션 삭제 `DELETE /api/sessions/{sessionId}` 추가 (완전 삭제, `204`, 없으면 `404`). 채팅방 프로필 표시는 기존 세션 응답의 `profile`을 쓴다고 적음
+- **v1.3 (2026-11-14)**: 신청 가이드 PDF 세부 확정. `pdfUrl`은 같은 출처 경로(`/api/guides/{token}.pdf`)로 10분 만료, PDF 받기는 `X-Client-Id` 없이 열림, 만료 링크 `404 GUIDE_NOT_FOUND`, 요청 제한·하루 상한은 채팅과 같은 기준, PDF 내용 목차
