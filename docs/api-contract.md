@@ -48,8 +48,9 @@
 
 **신청 가이드 PDF (v1.3)**
 - [ ] mock 대신 `POST /api/sessions/{sessionId}/guides`. 요청·응답 형식은 그대로 (4.7)
+- [ ] 응답 `outsideProfile`이 `true`면 PDF를 열면서 안내를 함께 띄움 (예: "프로필 조건(지역·나이 등)으로 찾은 정책이 아니에요. 가이드의 '확인할 조건'을 꼭 확인해 주세요"). 가이드는 정상으로 만들어짐
 - [ ] `pdfUrl`은 **같은 출처 경로**(`/api/guides/….pdf`). 받으면 바로 새 탭으로 열거나 내려받음. 10분 뒤 만료되니 저장해 두지 않고, 다시 볼 때는 같은 요청을 다시 보냄
-- [ ] 만드는 데 **10~20초**쯤 걸림 (LLM 호출). 버튼을 누르면 로딩 표시, 응답 전까지 같은 버튼 중복 클릭 막기
+- [ ] 만드는 데 **5~10초**쯤 걸림 (LLM 호출, 11-14 실측 4~10초). 버튼을 누르면 로딩 표시, 응답 전까지 같은 버튼 중복 클릭 막기
 - [ ] `429`·`502`·`504`가 올 수 있음. `message`를 그대로 보여 주면 됨
 
 **배포 뒤**
@@ -284,8 +285,8 @@ interface SidoRegions {
 | `POST /api/sessions/{sessionId}/chat` | 채팅 (SSE, 5절) | 됨 |
 | `GET /api/sessions/{sessionId}/recommendations` | 추천 정책 | 됨 |
 | `POST /api/sessions/{sessionId}/summary` | 대화 요약 | 됨 |
-| `POST /api/sessions/{sessionId}/guides` | 신청 가이드 PDF 만들기 | 구현 중 (v1.3) |
-| `GET /api/guides/{token}.pdf` | 만든 PDF 받기 (`pdfUrl`) | 구현 중 (v1.3) |
+| `POST /api/sessions/{sessionId}/guides` | 신청 가이드 PDF 만들기 | 됨 (v1.3) |
+| `GET /api/guides/{token}.pdf` | 만든 PDF 받기 (`pdfUrl`) | 됨 (v1.3) |
 | `GET /api/policies` | 정책 검색 (`sessionId`를 주면 채팅방 안 검색) | 됨 |
 | `GET /api/policies/{policyId}` | 정책 상세 | 됨 |
 | `GET /api/regions` | 지역 목록 | 됨 |
@@ -395,23 +396,24 @@ interface SidoRegions {
 - 비활성 정책의 스크랩은 지우지 않고 목록에서만 뺌 (다시 활성이 되면 돌아옴)
 - 스크랩 개수 상한 없음
 
-### 4.7 신청 가이드 PDF `POST /api/sessions/{sessionId}/guides` (v1.3, 구현 중)
+### 4.7 신청 가이드 PDF `POST /api/sessions/{sessionId}/guides` (v1.3)
 ```json
 // 요청
 { "policyId": "20251031005400211234" }
 // 응답 201
 { "policyId": "20251031005400211234",
   "pdfUrl": "/api/guides/Xk3…Qz.pdf",
-  "expiresAt": "2026-11-14T18:10:00+09:00" }
+  "expiresAt": "2026-11-14T18:10:00+09:00",
+  "outsideProfile": false }
 ```
-- 동기 처리 (응답이 올 때 PDF가 만들어져 있음). LLM을 한 번 불러 보통 10~20초
+- 동기 처리 (응답이 올 때 PDF가 만들어져 있음). LLM을 한 번 불러 보통 5~10초 (11-14 실측 4~10초, 서버 시간 제한 45초)
 - `pdfUrl`은 **같은 출처 경로**. Vercel rewrites(`/api/*`)를 그대로 거치므로 프론트 주소 기준으로 열면 됨 (6.1)
 - `pdfUrl`은 **10분** 뒤 만료. 만료되면 같은 요청으로 다시 받음 (PDF에 프로필·대화 내용이 들어가서). 저장하지 않으므로 다시 만들 때마다 LLM을 부름
 - 오류: 없는 세션 `404 SESSION_NOT_FOUND`, 없는 정책·비활성 정책 `404 POLICY_NOT_FOUND`, `policyId` 형식 오류 `400 VALIDATION_FAILED`, 요청 제한·하루 상한 `429 RATE_LIMITED` (채팅과 같은 기준, 1.6), LLM 실패 `502 RAG_UPSTREAM_ERROR`, 시간 초과 `504 RAG_TIMEOUT`, 그 밖의 생성 실패 `500 INTERNAL_ERROR`. 어느 경우든 `message`를 그대로 보여 주면 됨
 
 **PDF 받기 `GET /api/guides/{token}.pdf`** → `200 application/pdf`
 - 브라우저가 링크로 바로 여는 주소라 `X-Client-Id`가 **필요 없음**. 추측할 수 없는 토큰이 열쇠 역할
-- `Content-Disposition: inline` (브라우저 PDF 뷰어로 열림, 파일 이름은 정책 이름). `Cache-Control: no-store`
+- `Content-Disposition: inline` (브라우저 PDF 뷰어로 열림, 파일 이름은 "정책 이름 신청 가이드.pdf"). `Cache-Control: no-store`. PDF 응답만 CSP가 `frame-ancestors 'none'` (1.7의 공통 CSP는 브라우저 PDF 뷰어를 막을 수 있어서)
 - 만료되었거나 없는 토큰은 `404 GUIDE_NOT_FOUND` ("가이드 링크가 만료되었어요. 가이드를 다시 만들어 주세요.")
 
 **PDF 내용** (형식이 아니라 참고용. 바뀌어도 API는 그대로)
@@ -424,6 +426,7 @@ interface SidoRegions {
 7. 용어 설명 (공고에 나온 용어만)
 8. 안내: 자동으로 만든 참고 자료이므로 공고 원문과 담당 기관에서 확인할 것, 정보 기준일, 만든 시각
 - 날짜·금액·링크·기관명은 공고 데이터에서 그대로 넣음. 공고에 없는 항목은 "공고에 나와 있지 않음"과 문의처
+- 세션 프로필의 1차 필터(채팅 추천과 같은 기준) 밖의 정책(검색·스크랩으로 연 다른 지역 정책 등)도 만들어 주되, 응답 `outsideProfile`이 `true`이고 PDF 주의사항 맨 앞에 "프로필 조건으로 찾은 추천 정책이 아님"을 적음. 어느 조건이 안 맞는지는 알려 주지 않음 (자격 판정을 하지 않아서)
 
 ## 5. 채팅 스트리밍 `POST /api/sessions/{sessionId}/chat`
 
@@ -562,7 +565,7 @@ data: {"messageId":"1234"}
 ## 8. 남은 일
 | 항목 | 상태 |
 |---|---|
-| 신청 가이드 PDF | 형식 확정 (4.7, v1.3), 구현 중 |
+| 신청 가이드 PDF | 구현됨 (4.7, v1.3). 배포 경로에서 PDF 열림 확인 필요 |
 | 서버 주소 | 인프라 배포 뒤 (6.1) |
 | 배포 경로 SSE 확인 | 서버가 뜨면 뼈대 → 실제 RAG 순서로 확인하고, 둘 다 통과하면 뼈대 삭제 (6.3) |
 | 개수 지정("5개 알려줘", "더 알려줘")·복합 질문 답변 | 형식은 이 문서대로 (5.3), 답변 동작은 구현 중. 정책 비교는 구현됨 (5.3) |
@@ -575,4 +578,4 @@ data: {"messageId":"1234"}
 - **v1.1 (2026-11-09)**: 정책 검색에 선택 쿼리 `sessionId` 추가 (채팅방 안 검색). 세션 프로필로 1차 필터, `keyword`·`category`만 함께 쓰고 `region`은 400. 정렬·페이지는 정책 검색 그대로
   - 보충 (11-09, 형식 변경 없음): 정책 비교 동작 (5.3). 두 정책까지, 카드는 비교한 정책만, 셋 이상은 되물음
 - **v1.2 (2026-11-13)**: 세션 삭제 `DELETE /api/sessions/{sessionId}` 추가 (완전 삭제, `204`, 없으면 `404`). 채팅방 프로필 표시는 기존 세션 응답의 `profile`을 쓴다고 적음
-- **v1.3 (2026-11-14)**: 신청 가이드 PDF 세부 확정. `pdfUrl`은 같은 출처 경로(`/api/guides/{token}.pdf`)로 10분 만료, PDF 받기는 `X-Client-Id` 없이 열림, 만료 링크 `404 GUIDE_NOT_FOUND`, 요청 제한·하루 상한은 채팅과 같은 기준, PDF 내용 목차
+- **v1.3 (2026-11-14)**: 신청 가이드 PDF 세부 확정. `pdfUrl`은 같은 출처 경로(`/api/guides/{token}.pdf`)로 10분 만료, PDF 받기는 `X-Client-Id` 없이 열림, 만료 링크 `404 GUIDE_NOT_FOUND`, 요청 제한·하루 상한은 채팅과 같은 기준, PDF 내용 목차. 응답에 `outsideProfile`(프로필 1차 필터 밖 정책)
