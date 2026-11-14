@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.api import health, internal, policies, regions, scraps, sessions
+from app.api import guides, health, internal, policies, regions, scraps, sessions
 from app.core.config import get_settings
 from app.core.dependencies import limit_public_requests, verify_origin
 from app.core.errors import register_error_handlers
@@ -71,3 +71,4 @@ app.include_router(sessions.router, dependencies=PUBLIC_DEPENDENCIES)
 app.include_router(policies.router, dependencies=PUBLIC_DEPENDENCIES)
 app.include_router(regions.router, dependencies=PUBLIC_DEPENDENCIES)
 app.include_router(scraps.router, dependencies=PUBLIC_DEPENDENCIES)
+app.include_router(guides.router, dependencies=PUBLIC_DEPENDENCIES)
