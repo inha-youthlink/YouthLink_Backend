@@ -11,7 +11,7 @@ MISSING = "공고에 나와 있지 않아요. 담당 기관(서울특별시)에 
 CONTENT = GuideContent(
     policy_name="청년 월세 지원",
     overview=[("담당 기관", "서울특별시"), ("신청 상태", "신청 가능 (2026-10-01 ~ 2026-11-30)")],
-    profile=[("지역", "서울특별시 강남구"), ("나이", "27세")],
+    profile=[("지역", "서울특별시 강남구"), ("나이", "27세"), ("결혼 여부", "제한없음"), ("연소득", "2,400만 원")],
     observed=[("주거 상황", "월세 원룸에 혼자 거주")],
     conditions=["나이: 19~34세", "무주택자"],
     steps=[("온라인 신청서 작성", "복지로"), ("결과 통보를 기다림", "")],
@@ -23,6 +23,7 @@ CONTENT = GuideContent(
     generated_at=datetime(2026, 11, 14, 20, 30),
     synced_on=date(2026, 11, 10),
     source_url="https://example.go.kr",
+    alerts=["선착순으로 마감될 수 있어요."],
 )
 
 
@@ -46,8 +47,16 @@ def test_render_full_guide(drawn):
 
     assert pdf.startswith(b"%PDF")
     headings = [text for text in drawn if text[:2] in {f"{n}." for n in range(1, 10)}]
-    assert headings == ["1. 내 상황", "2. 확인할 조건", "3. 신청 방법", "4. 제출 서류", "5. 주의사항", "6. 용어 설명"]
-    for text in ["월세 원룸에 혼자 거주", "무주택자", "온라인 신청서 작성", "임대차계약서, 월세 이체 증빙", "중위소득"]:
+    # 할 일(신청 방법·서류)이 앞, 참고 정보(내 상황·용어)가 뒤, 서류 원문은 부록
+    assert headings == ["1. 신청 방법", "2. 제출 서류", "3. 확인할 조건", "4. 주의사항", "5. 내 상황", "6. 용어 설명"]
+    assert drawn.index("준비할 것") < drawn.index("1. 신청 방법")
+    assert "할 일 2단계 · 제출 서류 1개" in drawn
+    assert drawn.index("선착순으로 마감될 수 있어요.") < drawn.index("1. 신청 방법")
+    # 프로필은 한 줄, 알려 주는 것이 없는 값(제한없음)은 뺌
+    assert "서울특별시 강남구 · 27세 · 연소득 2,400만 원" in drawn
+    assert drawn.index("부록. 제출 서류 공고 원문") < drawn.index("임대차계약서, 월세 이체 증빙")
+    assert drawn.index("만든 시각: 2026-11-14 20:30") < drawn.index("부록. 제출 서류 공고 원문")
+    for text in ["월세 원룸에 혼자 거주", "무주택자", "온라인 신청서 작성", "복지로", "중위소득", "중복 수혜 불가"]:
         assert text in drawn
     assert "공고 확인: https://example.go.kr" in drawn
     assert "정책 정보 기준일: 2026-11-10" in drawn
@@ -58,17 +67,32 @@ def test_render_full_guide(drawn):
 # 공고에 없는 항목은 문의처 안내, 주의사항·용어는 절을 빼고 번호를 당김
 def test_render_empty_sections(drawn):
     empty = replace(
-        CONTENT, observed=[], conditions=[], steps=[], documents=[], documents_raw="", cautions=[], terms=[],
-        synced_on=None, source_url=None,
+        CONTENT, profile=[], observed=[], conditions=[], steps=[], documents=[], documents_raw="", cautions=[],
+        terms=[], synced_on=None, source_url=None, alerts=[],
     )
 
     render_guide_pdf(empty)
 
     headings = [text for text in drawn if text[:2] in {f"{n}." for n in range(1, 10)}]
-    assert headings == ["1. 내 상황", "2. 확인할 조건", "3. 신청 방법", "4. 제출 서류"]
+    assert headings == ["1. 신청 방법", "2. 제출 서류", "3. 확인할 조건", "4. 내 상황"]
     assert drawn.count(MISSING) == 3
+    assert "신청 방법 공고에 없음 · 제출 서류 목록 공고에 없음" in drawn
+    assert "프로필 정보가 없어요." in drawn
     assert "대화에서 따로 말씀하신 내용이 없어 프로필만 적었어요." in drawn
-    assert not any(text.startswith(("공고 확인", "정책 정보 기준일")) for text in drawn)
+    assert not any(text.startswith(("공고 확인", "정책 정보 기준일", "부록")) for text in drawn)
+
+
+# 서류 체크리스트가 없으면 원문을 본문에 두고 부록은 만들지 않음
+def test_render_documents_raw_without_checklist(drawn):
+    render_guide_pdf(replace(CONTENT, documents=[]))
+
+    assert drawn.index("임대차계약서, 월세 이체 증빙") < drawn.index("3. 확인할 조건")
+    assert not any(text.startswith("부록") for text in drawn)
+
+
+# 단계 표만 마크다운을 켜, 원문의 표시 기호가 굵게·밑줄로 읽히지 않게 함
+def test_markdown_safe():
+    assert guide_pdf._markdown_safe("**주의** __밑줄__ -- ~~취소~~") == "*주의* _밑줄_ - ~취소~"
 
 
 # 표 칸이 길거나 띄어쓰기 없는 긴 단어여도 PDF가 만들어짐 (표 칸은 잘라 한 행이 페이지를 넘지 않음)

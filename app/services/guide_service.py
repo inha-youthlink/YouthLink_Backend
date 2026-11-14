@@ -209,11 +209,8 @@ def guide_content(
         steps=[(step.action, step.where) for step in draft.steps[:GUIDE_LIST_MAX] if step.action.strip()],
         documents=_strings(draft.documents),
         documents_raw=clean_text(detail.submission_documents),
-        cautions=(
-            ([] if in_profile else [OUTSIDE_PROFILE_CAUTION])
-            + _code_cautions(detail, item.application_status, now.date())
-            + _strings(draft.cautions)
-        ),
+        cautions=_strings(draft.cautions),
+        alerts=([] if in_profile else [OUTSIDE_PROFILE_CAUTION]) + _code_cautions(detail, item.application_status, now.date()),
         terms=[(term.term, term.meaning) for term in draft.terms[:GUIDE_LIST_MAX] if term.meaning.strip()],
         missing=missing_text(source_url, record.supervising_org_name, detail.operating_org_name),
         generated_at=now,

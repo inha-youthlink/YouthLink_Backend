@@ -216,7 +216,7 @@ def test_create_guide_outside_profile_warns(client, policies, room_id, monkeypat
     assert response.json()["outsideProfile"] is True
     policy_filter, policy_no = policies.filters[0]
     assert (policy_filter.region_codes, policy_filter.age, policy_no) == (("11680",), 27, POLICY_NO)
-    assert contents[0].cautions[0] == guide_service.OUTSIDE_PROFILE_CAUTION
+    assert contents[0].alerts[0] == guide_service.OUTSIDE_PROFILE_CAUTION
 
 
 def test_create_guide_counts_daily_llm_limit(client, room_id):
@@ -305,8 +305,9 @@ def test_guide_content():
     assert content.steps == [("복지로에서 온라인 신청", "복지로")]
     # 기본 조건은 코드, 추가 자격·참여 제한은 LLM
     assert content.conditions == ["나이: 만 19~34세", "무주택자", "참여 제한: 기존 수혜자"]
-    assert content.cautions == ["선착순으로 마감될 수 있어요.", "예산 소진 시 조기 마감"]
-    assert guide_service.OUTSIDE_PROFILE_CAUTION not in content.cautions
+    # 코드가 정한 경고는 첫 쪽 요약에, LLM 주의사항은 본문에
+    assert content.alerts == ["선착순으로 마감될 수 있어요."]
+    assert content.cautions == ["예산 소진 시 조기 마감"]
     assert content.documents_raw == "임대차계약서, 월세 이체 증빙"
     assert content.synced_on == date(2026, 11, 10)
     assert content.source_url == "https://www.apply.go.kr"
@@ -336,7 +337,7 @@ def test_guide_content_deadline_cautions(end, period_type, expected):
 
     content = guide_content(_detail(record=record), _conditions(), draft, None, NOW)
 
-    assert content.cautions == ([expected] if expected else [])
+    assert content.alerts == ([expected] if expected else [])
 
 
 def test_conversation_lines_cut_answers_and_drop_oldest(monkeypatch):
