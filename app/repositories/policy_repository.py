@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import text
@@ -58,7 +58,8 @@ SELECT {RECORD_COLUMNS},
        p.description, p.support_content, p.application_method, p.submission_documents,
        p.additional_qualification, p.participation_exclusion, p.operating_org_name,
        p.min_age, p.max_age, p.income_condition_code, p.min_income, p.max_income, p.income_etc,
-       c.code_name AS marriage_name, p.is_active
+       c.code_name AS marriage_name, p.is_active,
+       p.screening_method, p.additional_notes, p.first_come_first_served, p.application_period_raw, p.synced_at
 FROM policy p
 LEFT JOIN common_code c ON c.code = p.marriage_status_code
 WHERE p.policy_no = :policy_no
@@ -189,6 +190,12 @@ class PolicyDetailRecord:
     eligibility_names: dict[str, list[str]] = field(default_factory=dict)
     # 원천에서 사라진 정책은 ETL이 지우지 않고 비활성으로 남김. 보여 줄지는 서비스가 정함
     is_active: bool = True
+    # 신청 가이드 PDF에서만 씀 (심사 방법, 기타 사항, 선착순, 기간 원문, 정보 기준일)
+    screening_method: str | None = None
+    additional_notes: str | None = None
+    first_come_first_served: bool | None = None
+    application_period_raw: str | None = None
+    synced_at: datetime | None = None
 
 
 RECORD_FIELDS = frozenset(PolicyRecord.__dataclass_fields__)
@@ -232,6 +239,14 @@ class PolicyRepository:
         async with self._session_factory() as session:
             result = await session.execute(text(sql), params)
             return list(result.scalars())
+
+    # 정책 하나가 필터를 통과하는지. 신청 가이드가 프로필 조건(채팅 추천과 같은 1차 필터) 밖의 정책인지 볼 때 씀
+    async def matches_filter(self, policy_filter: PolicyFilter, policy_no: str, today: date) -> bool:
+        where, params = _filter_where(policy_filter, today)
+        sql = text(f"SELECT EXISTS (SELECT 1 FROM policy p WHERE p.policy_no = :policy_no AND {where})")
+        async with self._session_factory() as session:
+            result = await session.execute(sql, {**params, "policy_no": policy_no})
+            return bool(result.scalar_one())
 
     async def get_detail(self, policy_no: str) -> PolicyDetailRecord | None:
         async with self._session_factory() as session:
