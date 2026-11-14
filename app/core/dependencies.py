@@ -16,6 +16,7 @@ from app.repositories.chat_repository import ChatRepository
 from app.repositories.common_code_repository import CommonCodeRepository
 from app.repositories.policy_repository import PolicyRepository
 from app.repositories.scrap_repository import ScrapRepository
+from app.services.guide_store import GuideStore
 
 
 # VectorRepository는 넣지 않음. 파이프라인은 검색기를 통해서만 검색함
@@ -116,6 +117,13 @@ def verify_origin(
         return
     if not _same_secret(x_origin_secret, settings.origin_secret.get_secret_value()):
         raise ForbiddenOriginError
+
+
+# 설정이 바뀌지 않으므로 하나만 만듦
+@lru_cache
+def get_guide_store() -> GuideStore:
+    settings = get_settings()
+    return GuideStore(settings.guide_directory, settings.guide_ttl_seconds)
 
 
 # 횟수를 프로세스 전체에서 함께 세야 해서 하나만 만듦

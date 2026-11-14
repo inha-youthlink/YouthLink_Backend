@@ -9,6 +9,7 @@ from app.core.dependencies import (
     ClientId,
     PipelineDeps,
     get_chat_repository,
+    get_guide_store,
     get_pipeline_deps,
     get_rate_limits,
     get_session_locks,
@@ -19,6 +20,7 @@ from app.core.rate_limit import RateLimits
 from app.core.session_lock import SessionLocks
 from app.core.sse import SSE_HEADERS, with_pings
 from app.repositories.chat_repository import ChatRepository
+from app.schemas.guide import GuideRequest, GuideResult
 from app.schemas.public import ErrorResponse
 from app.schemas.session import (
     ChatRequest,
@@ -31,6 +33,8 @@ from app.schemas.session import (
 from app.services.assist_service import AssistService
 from app.services.chat_service import ChatService
 from app.services.chat_skeleton import skeleton_events
+from app.services.guide_service import GuideService
+from app.services.guide_store import GuideStore
 
 
 # 응답이 X-Client-Id마다 달라 공용 캐시가 다른 사용자의 목록을 돌려주지 않게 막음
@@ -62,6 +66,14 @@ def get_chat_service(
     session_locks: SessionLocks = Depends(get_session_locks),
 ) -> ChatService:
     return ChatService(chat_repository, pipeline_deps, session_locks)
+
+
+def get_guide_service(
+    chat_repository: ChatRepository = Depends(get_chat_repository),
+    pipeline_deps: PipelineDeps = Depends(get_pipeline_deps),
+    store: GuideStore = Depends(get_guide_store),
+) -> GuideService:
+    return GuideService(chat_repository, pipeline_deps, store)
 
 
 Service = Annotated[ChatService, Depends(get_chat_service)]
@@ -112,6 +124,28 @@ async def create_summary(
     limits: Annotated[RateLimits, Depends(get_rate_limits)],
 ) -> SummaryResult:
     return SummaryResult(summary=await assist.summarize(session_id, client_id, limits))
+
+
+# 계약 4.7: 요약처럼 LLM을 부르므로 채팅과 같은 요청 제한과 하루 상한을 씀
+@router.post(
+    "/{session_id}/guides",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": ErrorResponse},
+        status.HTTP_502_BAD_GATEWAY: {"model": ErrorResponse},
+        status.HTTP_504_GATEWAY_TIMEOUT: {"model": ErrorResponse},
+        **_NOT_FOUND,
+    },
+    dependencies=[Depends(limit_chat_requests)],
+)
+async def create_guide(
+    session_id: SessionId,
+    request: GuideRequest,
+    client_id: ClientId,
+    guides: Annotated[GuideService, Depends(get_guide_service)],
+    limits: Annotated[RateLimits, Depends(get_rate_limits)],
+) -> GuideResult:
+    return await guides.create(session_id, client_id, request.policy_id, limits)
 
 
 # 최대 10개, 신청 가능한 정책 우선 (계약 4.2, B3). LLM을 부르지 않아 채팅 요청 제한은 걸지 않음

@@ -132,6 +132,17 @@ async def test_open_only_excludes_closed_and_upcoming(repository):
     assert await _filter(repository, exclude_closed=True, exclude_upcoming=True) == ALL - {"F-CLOSED", "F-UPCOMING"}
 
 
+# 정책 하나만 같은 필터로 확인 (신청 가이드). 비활성·없는 정책은 통과하지 않음
+async def test_matches_filter_single_policy(repository):
+    gangnam = PolicyFilter(region_codes=("11680",), age=27)
+
+    assert await repository.matches_filter(gangnam, "F-GANGNAM", TODAY) is True
+    assert await repository.matches_filter(gangnam, "F-INCHEON", TODAY) is False
+    assert await repository.matches_filter(PolicyFilter(age=40), "F-GANGNAM", TODAY) is False
+    assert await repository.matches_filter(PolicyFilter(), "F-INACTIVE", TODAY) is False
+    assert await repository.matches_filter(PolicyFilter(), "F-NONE", TODAY) is False
+
+
 async def test_region_labels(repository):
     labels = await repository.get_region_labels(["F-SEOUL", "F-GANGNAM", "F-NATION"])
 

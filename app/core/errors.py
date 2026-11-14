@@ -110,6 +110,13 @@ class PolicyNotFoundError(ApiError):
         super().__init__(status.HTTP_404_NOT_FOUND, "POLICY_NOT_FOUND", "정책을 찾을 수 없습니다.")
 
 
+class GuideNotFoundError(ApiError):
+    def __init__(self) -> None:
+        super().__init__(
+            status.HTTP_404_NOT_FOUND, "GUIDE_NOT_FOUND", "가이드 링크가 만료되었어요. 가이드를 다시 만들어 주세요."
+        )
+
+
 def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ApiError, _handle_api_error)
     app.add_exception_handler(RequestValidationError, _handle_validation_error)

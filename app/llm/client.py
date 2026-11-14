@@ -153,5 +153,23 @@ class LLMClient:
             completion_tokens=usage.output_tokens if usage else 0,
         )
 
+    # 답변 모델로 구조화 출력을 받음 (신청 가이드). 분석과 달리 입력이 길어 시간 제한을 따로 줌
+    # 동기 요청이라 재시도하면 사용자가 시간 제한을 몇 번 기다릴 수 있어 한 번만 부름
+    async def structured[T: BaseModel](
+        self, messages: list[dict[str, str]], text_format: type[T], *, timeout: float
+    ) -> ParsedResult[T]:
+        client = self._client.with_options(timeout=timeout, max_retries=0)
+        response = await client.responses.parse(
+            model=self.chat_model,
+            input=messages,
+            text_format=text_format,
+        )
+        usage = response.usage
+        return ParsedResult(
+            parsed=response.output_parsed,
+            prompt_tokens=usage.input_tokens if usage else 0,
+            completion_tokens=usage.output_tokens if usage else 0,
+        )
+
     async def close(self) -> None:
         await self._client.close()

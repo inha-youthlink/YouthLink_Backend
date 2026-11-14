@@ -1,4 +1,6 @@
+import tempfile
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr, model_validator
@@ -80,9 +82,21 @@ class Settings(BaseSettings):
     chat_skeleton_tokens: int = Field(default=90, ge=1)
     chat_skeleton_token_interval: float = Field(default=1.0, ge=0)
 
+    # Guide PDF (계약 4.7)
+    # 비우면 시스템 임시 폴더 아래 youthlink-guides. 워커가 여러 개면 모두 같은 폴더를 봐야 링크가 열림
+    guide_dir: Path | None = None
+    # PDF에 프로필·대화 내용이 들어가 짧게 둠 (계약상 10분 이하)
+    guide_ttl_seconds: int = Field(default=600, gt=0, le=600)
+    # 동기 응답이라 프록시(Vercel) 대기 시간 제한 안에 끝나야 함. 보통 5~10초 (11-14 실측 4~10초)
+    guide_timeout: float = Field(default=45.0, gt=0)
+
     @property
     def is_prod(self) -> bool:
         return self.app_env == "prod"
+
+    @property
+    def guide_directory(self) -> Path:
+        return self.guide_dir or Path(tempfile.gettempdir()) / "youthlink-guides"
 
     # 공개 주소로 열리는 운영 서버가 위험한 설정으로 뜨지 않게 시작할 때 막음
     @model_validator(mode="after")

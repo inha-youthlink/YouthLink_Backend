@@ -68,9 +68,12 @@ async def detail_repository(session_factory):
         await session.execute(text("""
             INSERT INTO policy (policy_no, policy_name, description, support_content, application_method,
                                 additional_qualification, min_age, max_age, income_condition_code, max_income,
-                                marriage_status_code, supervising_org_name, operating_org_name, large_categories)
+                                marriage_status_code, supervising_org_name, operating_org_name, large_categories,
+                                screening_method, additional_notes, first_come_first_served, application_period_raw,
+                                synced_at)
             VALUES (:no, '상세 정책', '요약', '지원 내용', '온라인', '추가 자격', 19, 39, '0043002', 5000,
-                    '0055002', '서울특별시', '서울청년센터', ARRAY['주거'])
+                    '0055002', '서울특별시', '서울청년센터', ARRAY['주거'],
+                    '서류 심사', '중복 지원 불가', TRUE, '2026.10.01 ~ 2026.11.30', '2026-11-10T03:00:00+00:00')
         """), {"no": DETAIL_NO})
         await session.execute(
             text("""INSERT INTO policy_eligibility_code (policy_no, condition_type, condition_code)
@@ -96,6 +99,12 @@ async def test_get_detail(detail_repository):
     assert (detail.min_age, detail.max_age, detail.income_condition_code, detail.max_income) == (19, 39, "0043002", 5000)
     assert detail.marriage_name == "미혼"
     assert detail.is_active is True
+    # 신청 가이드용
+    assert (detail.screening_method, detail.additional_notes, detail.first_come_first_served) == (
+        "서류 심사", "중복 지원 불가", True,
+    )
+    assert detail.application_period_raw == "2026.10.01 ~ 2026.11.30"
+    assert detail.synced_at == datetime(2026, 11, 10, 3, tzinfo=UTC)
     # 코드 순서대로, 제한없음도 그대로 (거르는 것은 서비스에서)
     assert detail.eligibility_names == {"JOB": ["미취업자", "프리랜서"], "MAJOR": ["제한없음"]}
 

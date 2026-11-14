@@ -17,27 +17,33 @@ ELIGIBILITY_LABELS = (("JOB", "취업 상태"), ("SCHOOL", "학력"), ("MAJOR", 
 
 # 1차 필터와 같은 값(나이·소득 상한·코드)으로 만들어, 화면의 자격과 추천에서 거른 기준이 어긋나지 않음
 def eligibility_text(detail: PolicyDetailRecord) -> str:
-    lines = [f"- 나이: {_age(detail.min_age, detail.max_age)}"]
-    income = _income(detail)
-    if income:
-        lines.append(f"- 소득: {income}")
-    if detail.marriage_name in MARRIAGE_NAMES:
-        lines.append(f"- 혼인: {detail.marriage_name}")
-    for condition_type, label in ELIGIBILITY_LABELS:
-        names = [name for name in detail.eligibility_names.get(condition_type, []) if name != NO_RESTRICTION_NAME]
-        # "기타"만 있으면 알려 주는 것이 없어 뺌. 다른 값과 섞이면 빼는 순간 대상이 실제보다 좁아 보여 둠
-        if names and names != [OTHER_NAME]:
-            lines.append(f"- {label}: {', '.join(names)}")
+    lines = [f"- {line}" for line in eligibility_lines(detail)]
     for title, text in (("추가 자격", detail.additional_qualification), ("참여 제한 대상", detail.participation_exclusion)):
         if clean_text(text):
             lines += [title, clean_text(text)]
     return "\n".join(lines)
 
 
+# 기본 조건만 ("나이: 만 19~34세"). 추가 자격·참여 제한 원문은 넣지 않음 (신청 가이드는 LLM이 항목으로 나눔)
+def eligibility_lines(detail: PolicyDetailRecord) -> list[str]:
+    lines = [f"나이: {_age(detail.min_age, detail.max_age)}"]
+    income = _income(detail)
+    if income:
+        lines.append(f"소득: {income}")
+    if detail.marriage_name in MARRIAGE_NAMES:
+        lines.append(f"혼인: {detail.marriage_name}")
+    for condition_type, label in ELIGIBILITY_LABELS:
+        names = [name for name in detail.eligibility_names.get(condition_type, []) if name != NO_RESTRICTION_NAME]
+        # "기타"만 있으면 알려 주는 것이 없어 뺌. 다른 값과 섞이면 빼는 순간 대상이 실제보다 좁아 보여 둠
+        if names and names != [OTHER_NAME]:
+            lines.append(f"{label}: {', '.join(names)}")
+    return lines
+
+
 # 비어 있으면 사용자가 다음에 할 일을 알 수 있게 확인할 곳을 안내함
 # 링크의 절반 이상이 기관 홈페이지 첫 화면이라(B7) 기관 문의를 앞에 두고 링크는 참고로 씀
 def missing_text(source_url: str | None, organization: str | None, operator: str | None) -> str:
-    organization = _contact(clean_text(organization), clean_text(operator))
+    organization = contact_name(clean_text(organization), clean_text(operator))
     if organization and source_url:
         return f"공고에 나와 있지 않아요. 담당 기관({organization})에 문의하거나 관련 사이트를 참고해 주세요."
     if organization:
@@ -49,7 +55,7 @@ def missing_text(source_url: str | None, organization: str | None, operator: str
 
 # 실제 연락할 곳은 운영 기관(공단·재단 등)인 경우가 많지만 "기획예산실"처럼 그것만으로는 어디인지 모르는 이름이 있어
 # 다르면 주관 기관과 함께 씀
-def _contact(organization: str, operator: str) -> str:
+def contact_name(organization: str, operator: str) -> str:
     if organization and operator and operator != organization:
         return f"{organization}, 운영: {operator}"
     return organization or operator
