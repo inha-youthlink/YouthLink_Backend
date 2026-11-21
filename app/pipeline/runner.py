@@ -90,6 +90,7 @@ async def stream_pipeline(inp: PipelineInput, deps: PipelineDeps) -> AsyncGenera
     async with aclosing(generate_stream(ctx)) as events:
         async for event in events:
             if isinstance(event, CardsDecided):
+                latency["cards"] = _elapsed_ms(started)
                 if event.numbers is None:
                     logger.warning("답변 첫 줄 카드 형식이 없어 후보 전체를 카드로 표시함")
                 policies = build_cards(
@@ -105,6 +106,13 @@ async def stream_pipeline(inp: PipelineInput, deps: PipelineDeps) -> AsyncGenera
     if result is None:
         raise RuntimeError("답변 스트림이 결과 없이 끝남")
     latency["generate"] = _elapsed_ms(generate_started)
+    # 답변 LLM 요청부터 첫 이벤트·첫 글자(카드 줄 포함)까지. 첫 글자 이후 카드 줄을 다 받기까지는 cards로 봄
+    usage = result.usage
+    if usage is not None:
+        if usage.first_event_ms is not None:
+            latency["generate_first_event"] = usage.first_event_ms
+        if usage.first_text_ms is not None:
+            latency["generate_first_text"] = usage.first_text_ms
 
     ctx.trace.update({
         "contexts": result.contexts,
@@ -118,7 +126,12 @@ async def stream_pipeline(inp: PipelineInput, deps: PipelineDeps) -> AsyncGenera
         "prompt_version": result.prompt_version,
         "embedding_model": deps.llm.embedding_model,
         "chat_model": deps.llm.chat_model,
-        "tokens": {"prompt": result.prompt_tokens, "completion": result.completion_tokens},
+        "tokens": {
+            "prompt": result.prompt_tokens,
+            "completion": result.completion_tokens,
+            "cached": usage.cached_tokens if usage else 0,
+            "reasoning": usage.reasoning_tokens if usage else 0,
+        },
     })
     latency["total"] = _elapsed_ms(started)
     yield PipelineOutput(

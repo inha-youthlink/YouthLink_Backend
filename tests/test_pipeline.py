@@ -187,7 +187,7 @@ async def test_missing_card_number_clarifies_without_llm_answer():
     assert [policy.policy_no for policy in output.policies] == ["P-RENT", "P-MOVE"]
     assert output.trace["handler"] == "clarify"
     assert output.trace["prompt_version"] is None
-    assert output.trace["tokens"] == {"prompt": 0, "completion": 0}
+    assert output.trace["tokens"] == {"prompt": 0, "completion": 0, "cached": 0, "reasoning": 0}
     assert (output.trace["retrieved_chunks"], output.trace["filtered_policy_nos"]) == ([], None)
     assert set(output.trace["latency_ms"]) >= {"analyze", "generate", "total"}
 
@@ -255,7 +255,7 @@ async def test_stream_sends_cards_then_tokens_then_output():
     assert "".join(token.text for token in tokens) == output.answer == "1. 청년 이사비 지원"
     assert output.policies == events[0].policies
     latency = output.trace["latency_ms"]
-    assert latency["analyze"] <= latency["first_token"] <= latency["total"]
+    assert latency["analyze"] <= latency["cards"] <= latency["first_token"] <= latency["total"]
 
 
 # 채팅 연결이 끊겨 파이프라인 스트림이 닫히면 LLM 스트림도 바로 닫힘
