@@ -7,30 +7,31 @@ from fastapi.testclient import TestClient
 from app.api.sessions import get_chat_service
 from app.core.config import get_settings
 from app.main import app
+from app.schemas.pipeline import PolicyItem
 from tests.conftest import (
     CLIENT_ID,
     HEADERS,
     OTHER_CLIENT_ID,
     PROFILE,
     FakeChatRepository,
+    FakePipeline,
     make_service,
 )
 
 MESSAGE_ID = "5d7f0a3e-2b1c-4e8f-9a6d-3c2b1a0f9e8d"
+CARD = PolicyItem(policy_no="P-RENT", policy_name="청년 월세 지원", score=0.9, region_label="서울특별시")
+# 10번째 조각에 줄바꿈을 넣어 JSON 문자열로 나가는지 봄
+TOKENS = [f"답변 {n}. " for n in range(1, 10)] + ["줄바꿈\n", "11. ", "12."]
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     repo = FakeChatRepository()
-    settings = get_settings().model_copy(
-        update={
-            "sse_ping_interval": 0.05,
-            "chat_skeleton_enabled": True,
-            "chat_skeleton_first_delay": 0.12,
-            "chat_skeleton_tokens": 12,
-            "chat_skeleton_token_interval": 0.0,
-        }
+    # 첫 이벤트 전 대기가 ping 간격보다 길어 :ping이 먼저 나감
+    monkeypatch.setattr(
+        "app.pipeline.runner.stream_pipeline", FakePipeline(tokens=TOKENS, policies=[CARD], delay=0.12)
     )
+    settings = get_settings().model_copy(update={"sse_ping_interval": 0.05})
     app.dependency_overrides[get_chat_service] = lambda: make_service(repo)
     app.dependency_overrides[get_settings] = lambda: settings
     yield TestClient(app)
@@ -70,12 +71,12 @@ def test_stream_follows_contract_order(client):
 
     events = _events(response.text)
     names = [name for name, _ in events]
-    # 첫 token 전 대기 동안 :ping이 나가고, policies → done으로 끝남
+    # 첫 이벤트 전 대기 동안 :ping이 나가고, policies → token들 → done (계약 5.2)
     assert names[0] == "ping"
-    assert names[-2:] == ["policies", "done"]
-    assert names.count("token") == 12
-    assert events[-1][1] == {"messageId": f"skeleton-{MESSAGE_ID}"}
-    assert events[-2][1][0]["id"] == "SKELETON-1"
+    content = [name for name in names if name != "ping"]
+    assert content == ["policies", *["token"] * 12, "done"]
+    assert events[-1][1]["messageId"].isdigit()
+    assert [card["id"] for card in dict(events)["policies"]] == ["P-RENT"]
 
 
 def test_token_with_newline_stays_json_string(client):

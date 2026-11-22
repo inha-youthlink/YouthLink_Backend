@@ -339,6 +339,56 @@ async def test_current_policies_roll_back_with_turn(chat_repository):
     assert [p.policy_no for p in await chat_repository.list_current_policies(room_id)] == [TEST_POLICY_NOS[0]]
 
 
+# "채팅에서 물어보기": 이전 현재 정책을 모두 지우고 그 정책 하나만 남김. 다른 방·메시지는 그대로
+async def test_replace_current_policies(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    other_id = await chat_repository.create_room(USER_ID, Profile())
+    await _save_turn(chat_repository, room_id, "질문", current_policies=[
+        _ref(TEST_POLICY_NOS[0]), _ref(TEST_POLICY_NOS[1]),
+    ])
+    await _save_turn(chat_repository, other_id, "다른 방", current_policies=[_ref(TEST_POLICY_NOS[0])])
+
+    await chat_repository.replace_current_policies(room_id, [TEST_POLICY_NOS[2]])
+
+    assert [p.policy_no for p in await chat_repository.list_current_policies(room_id)] == [TEST_POLICY_NOS[2]]
+    assert [p.policy_no for p in await chat_repository.list_current_policies(other_id)] == [TEST_POLICY_NOS[0]]
+    assert len(await chat_repository.list_messages(room_id)) == 2
+
+
+# 주인 확인 뒤 방이 지워진 경우: FK 오류 대신 False
+async def test_replace_current_policies_missing_room(chat_repository):
+    assert await chat_repository.replace_current_policies(uuid.uuid4(), [TEST_POLICY_NOS[0]]) is False
+
+
+async def _save_with_start(repo: ChatRepository, room_id, current_policies, at_start) -> int:
+    question_id = await repo.save_question(room_id, uuid.uuid4(), "질문", "제목")
+    return await repo.save_answer(
+        room_id=room_id, question_id=question_id, answer="답변", answer_metadata={}, policies=[],
+        current_policies=current_policies, current_policies_at_start=at_start,
+    )
+
+
+# 답변 시작 때와 현재 정책이 같으면(중간에 지정 없음) 답변의 현재 정책으로 바꿈
+async def test_save_answer_replaces_when_unchanged_since_start(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    await chat_repository.replace_current_policies(room_id, [TEST_POLICY_NOS[0]])
+
+    await _save_with_start(chat_repository, room_id, [_ref(TEST_POLICY_NOS[1])], [TEST_POLICY_NOS[0]])
+
+    assert [p.policy_no for p in await chat_repository.list_current_policies(room_id)] == [TEST_POLICY_NOS[1]]
+
+
+# 답변 중에 "채팅에서 물어보기"로 지정했으면 답변은 저장하되 지정한 정책을 남김 (계약 4.9)
+async def test_save_answer_keeps_policy_set_during_answer(chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    await chat_repository.replace_current_policies(room_id, [TEST_POLICY_NOS[2]])
+
+    await _save_with_start(chat_repository, room_id, [_ref(TEST_POLICY_NOS[1])], [])
+
+    assert [p.policy_no for p in await chat_repository.list_current_policies(room_id)] == [TEST_POLICY_NOS[2]]
+    assert [m.role for m in await chat_repository.list_messages(room_id)] == ["user", "assistant"]
+
+
 # 답변 없이 남은 질문(연결 끊김, 생성 실패)은 대화 기록에서 빠지고 앞뒤 턴의 짝이 어긋나지 않음
 async def test_recent_turns_skip_unanswered_question(chat_repository):
     room_id = await chat_repository.create_room(USER_ID, Profile())

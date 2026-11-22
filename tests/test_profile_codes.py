@@ -13,7 +13,6 @@ from app.schemas.session import (
 from app.services.profile_codes import (
     EDUCATION_CODES,
     EMPLOYMENT_CODES,
-    LEGACY_SIDO_CODES,
     MAJOR_CODES,
     MARITAL_CODES,
     SPECIAL_CODES,
@@ -70,17 +69,11 @@ def test_unknown_code_is_null_in_response():
     assert to_session_profile(profile).education is None
 
 
-# v0.3 시도 enum 17개를 모두 표에 두고, 광주·전남은 통합특별시 하나로
-def test_legacy_sido_enum_becomes_sido_wide_code():
-    assert len(LEGACY_SIDO_CODES) == 17
-    assert region_code("SEOUL", REGIONS) == "11000"
-    assert region_code("GWANGJU", REGIONS) == region_code("JEONNAM", REGIONS) == "12000"
-
-
-# 시도 enum도 지역 표에 없는 시도면 저장하지 않음 (테스트 지역 표에 부산이 없음)
-def test_legacy_sido_enum_not_in_region_table():
+# v0.3 시도 enum은 계약 v1.4부터 받지 않음 (5자리 코드만)
+@pytest.mark.parametrize("value", ["SEOUL", "GYEONGGI"])
+def test_sido_enum_rejected(value):
     with pytest.raises(ValidationFailedError):
-        region_code("BUSAN", REGIONS)
+        region_code(value, REGIONS)
 
 
 def test_unknown_region_code():

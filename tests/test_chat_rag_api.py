@@ -47,7 +47,7 @@ def pipeline(monkeypatch) -> FakePipeline:
 
 @pytest.fixture
 def client(repo, locks, pipeline):
-    settings = get_settings().model_copy(update={"chat_skeleton_enabled": False, "sse_ping_interval": 5.0})
+    settings = get_settings().model_copy(update={"sse_ping_interval": 5.0})
     app.dependency_overrides[get_chat_service] = lambda: make_service(repo, locks)
     app.dependency_overrides[get_settings] = lambda: settings
     yield TestClient(app)

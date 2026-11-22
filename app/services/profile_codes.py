@@ -64,28 +64,6 @@ SPECIAL_CODES = {
     SpecialField.NONE: "0014010",
 }
 
-# 과도기 호환: v0.3 프론트가 보내는 시도 enum을 "○○ 전체" 코드로 받음. 프론트가 5자리 코드로 바꾸면 삭제
-# 광주·전남은 통합특별시(12) 하나로 합쳐짐
-LEGACY_SIDO_CODES = {
-    "SEOUL": "11",
-    "BUSAN": "26",
-    "DAEGU": "27",
-    "INCHEON": "28",
-    "GWANGJU": "12",
-    "DAEJEON": "30",
-    "ULSAN": "31",
-    "SEJONG": "36",
-    "GYEONGGI": "41",
-    "GANGWON": "51",
-    "CHUNGBUK": "43",
-    "CHUNGNAM": "44",
-    "JEONBUK": "52",
-    "JEONNAM": "12",
-    "GYEONGBUK": "47",
-    "GYEONGNAM": "48",
-    "JEJU": "50",
-}
-
 REGION_CODE = re.compile(r"\d{5}")
 MANWON = 10_000
 
@@ -104,11 +82,9 @@ def to_profile(request: SessionProfileRequest, regions: RegionIndex) -> Profile:
 
 
 # 모르는 코드는 필터가 조용히 시도 전체로 바꿔 사용자가 알 수 없으므로 세션을 만들 때 막음
-# 시도 enum도 행정구역이 바뀌면 표에 없는 코드가 될 수 있어 바꾼 뒤 같은 확인을 거침
 def region_code(value: str, regions: RegionIndex, field: str = "profile.region") -> str:
-    code = LEGACY_SIDO_CODES[value] + "000" if value in LEGACY_SIDO_CODES else value
-    if REGION_CODE.fullmatch(code) and regions.is_profile_code(code):
-        return code
+    if REGION_CODE.fullmatch(value) and regions.is_profile_code(value):
+        return value
     raise ValidationFailedError(field, "지원하지 않는 지역 코드입니다.")
 
 

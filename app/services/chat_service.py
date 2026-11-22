@@ -9,6 +9,7 @@ from openai import APITimeoutError, OpenAIError
 from app.core.dependencies import PipelineDeps
 from app.core.errors import (
     IdempotencyConflictError,
+    PolicyNotFoundError,
     SessionNotFoundError,
     StreamInProgressError,
 )
@@ -23,6 +24,7 @@ from app.schemas.pipeline import (
     PipelineInput,
     PipelineOutput,
     PolicyItem,
+    PolicyRef,
 )
 from app.schemas.session import (
     ChatRequest,
@@ -76,6 +78,17 @@ class ChatService:
         if not await self._chat_repository.delete_room(room_id, client_id):
             raise SessionNotFoundError
 
+    # 프로필 1차 필터는 걸지 않음: 검색·스크랩으로 연 다른 지역 정책도 물어볼 수 있게 (계약 4.9)
+    # 채팅 잠금은 보지 않음. 답변 중에 지정하면 그 답변을 저장할 때 지정한 정책을 남김 (save_answer)
+    async def set_current_policy(self, room_id: UUID, client_id: str, policy_id: str) -> None:
+        await self._get_owned_room(room_id, client_id)
+        # 상세 API와 같은 기준: 원천에서 사라진 정책은 없는 정책으로 봄
+        detail = await self._pipeline_deps.policy_repository.get_detail(policy_id)
+        if detail is None or not detail.is_active:
+            raise PolicyNotFoundError
+        if not await self._chat_repository.replace_current_policies(room_id, [policy_id]):
+            raise SessionNotFoundError
+
     # 스트림을 시작하면 상태 코드를 바꿀 수 없어, 거절할 요청(세션 없음, 생성 중, 키 충돌, 하루 상한)은 여기서 JSON 오류로 끝냄
     # 돌려준 스트림은 SSE 이벤트 문자열을 내보내고, 끝나거나 끊기면 세션 잠금을 풂
     async def start_chat(
@@ -93,7 +106,7 @@ class ChatService:
             if question is not None and question.answer_id is not None:
                 return self._locked(lock_key, self._replay(question.answer_id, question.answer or ""))
 
-            # 실제로 LLM을 부르는 요청만 셈 (뼈대·다시 보내기는 세지 않음)
+            # 실제로 LLM을 부르는 요청만 셈 (다시 보내기는 세지 않음)
             limits.use_llm()
             question_id = (
                 question.message_id if question is not None
@@ -178,7 +191,7 @@ class ChatService:
                     elif isinstance(event, runner.AnswerToken):
                         yield sse_event("token", event.text)
                     else:
-                        answer_id = await self._save_answer(room, question_id, event)
+                        answer_id = await self._save_answer(room, question_id, event, current_policies)
                         yield sse_event("done", {"messageId": str(answer_id)})
         except APITimeoutError:
             logger.exception("답변 생성 시간 초과")
@@ -190,7 +203,9 @@ class ChatService:
             logger.exception("답변 생성 실패")
             yield _error_event("INTERNAL_ERROR")
 
-    async def _save_answer(self, room: RoomRecord, question_id: int, output: PipelineOutput) -> int:
+    async def _save_answer(
+        self, room: RoomRecord, question_id: int, output: PipelineOutput, at_start: list[PolicyRef]
+    ) -> int:
         return await self._chat_repository.save_answer(
             room_id=room.room_id,
             question_id=question_id,
@@ -198,6 +213,7 @@ class ChatService:
             answer_metadata=_answer_metadata(output),
             policies=output.policies,
             current_policies=output.current_policies,
+            current_policies_at_start=[policy.policy_no for policy in at_start],
         )
 
 

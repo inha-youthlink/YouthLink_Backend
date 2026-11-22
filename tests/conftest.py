@@ -20,7 +20,7 @@ from app.core.session_lock import SessionLocks
 from app.main import app
 from app.pipeline.runner import AnswerToken, PipelineEvent, PolicyCards
 from app.repositories.chat_repository import ChatRepository, QuestionRecord, RoomRecord
-from app.repositories.policy_repository import RegionRow
+from app.repositories.policy_repository import PolicyDetailRecord, RegionRow
 from app.schemas.chat import MessageItem
 from app.schemas.pipeline import (
     ConversationTurn,
@@ -61,8 +61,14 @@ REGIONS = [
 
 
 class FakePolicyRepository:
+    def __init__(self, details: dict[str, PolicyDetailRecord] | None = None) -> None:
+        self.details = details or {}
+
     async def list_regions(self) -> list[RegionRow]:
         return REGIONS
+
+    async def get_detail(self, policy_no: str) -> PolicyDetailRecord | None:
+        return self.details.get(policy_no)
 
 
 # 코드 이름 조회. 정하지 않은 코드는 "이름"으로 돌려줌
@@ -133,6 +139,13 @@ class FakeChatRepository:
     async def list_current_policies(self, room_id: uuid.UUID) -> list[PolicyRef]:
         return self.current.get(room_id, [])
 
+    # 이름은 실제 저장소처럼 policy 테이블에서 읽는 대신 번호를 그대로 씀
+    async def replace_current_policies(self, room_id: uuid.UUID, policy_nos: list[str]) -> bool:
+        if room_id not in self.rooms:
+            return False
+        self.current[room_id] = [PolicyRef(policy_no=no, policy_name=no) for no in policy_nos]
+        return True
+
     async def find_question(self, room_id: uuid.UUID, client_message_id: uuid.UUID) -> QuestionRecord | None:
         messages = self.messages.get(room_id, [])
         question = next((m for m in messages if m.client_message_id == client_message_id), None)
@@ -154,14 +167,17 @@ class FakeChatRepository:
         return message_id
 
     async def save_answer(
-        self, room_id, question_id, answer, answer_metadata, policies, current_policies
+        self, room_id, question_id, answer, answer_metadata, policies, current_policies,
+        current_policies_at_start=None,
     ) -> int:
         answer_id = self._add(room_id, "assistant", answer, None)
         self.reply_to[answer_id] = question_id
         self.metadata[answer_id] = answer_metadata
         if policies:
             self.refs[answer_id] = list(policies)
-        self.current[room_id] = list(current_policies)
+        now = [policy.policy_no for policy in self.current.get(room_id, [])]
+        if current_policies_at_start is None or now == current_policies_at_start:
+            self.current[room_id] = list(current_policies)
         return answer_id
 
     def _add(self, room_id: uuid.UUID, role: str, content: str, client_message_id: uuid.UUID | None) -> int:
@@ -175,16 +191,21 @@ class FakeChatRepository:
 
 # 파이프라인 대신 정해진 카드·조각을 흘려보냄. 받은 입력은 calls에 남김
 class FakePipeline:
-    def __init__(self, tokens=("답변 ", "본문"), policies=(), fail: BaseException | None = None) -> None:
+    def __init__(
+        self, tokens=("답변 ", "본문"), policies=(), fail: BaseException | None = None, delay: float = 0.0
+    ) -> None:
         self.tokens = list(tokens)
         self.policies = list(policies)
         self.fail = fail
+        # 첫 이벤트 전 대기 (그동안 :ping이 나가는지 볼 때)
+        self.delay = delay
         self.calls: list[PipelineInput] = []
         self.closed = False
 
     async def __call__(self, inp: PipelineInput, deps) -> AsyncIterator[PipelineEvent]:
         self.calls.append(inp)
         try:
+            await asyncio.sleep(self.delay)
             yield PolicyCards(self.policies)
             for token in self.tokens:
                 yield AnswerToken(token)
@@ -199,8 +220,10 @@ class FakePipeline:
             self.closed = True
 
 
-def make_service(repo: FakeChatRepository, locks: SessionLocks | None = None) -> ChatService:
-    deps = SimpleNamespace(policy_repository=FakePolicyRepository(), settings=get_settings())
+def make_service(
+    repo: FakeChatRepository, locks: SessionLocks | None = None, policies: FakePolicyRepository | None = None
+) -> ChatService:
+    deps = SimpleNamespace(policy_repository=policies or FakePolicyRepository(), settings=get_settings())
     return ChatService(repo, deps, locks or SessionLocks())
 
 

@@ -98,7 +98,9 @@ def test_client_ip(trust, headers, expected):
 
 
 @pytest.fixture
-def limited():
+def limited(monkeypatch):
+    monkeypatch.setattr("app.pipeline.runner.stream_pipeline", FakePipeline())
+
     def make(**values) -> TestClient:
         settings = get_settings().model_copy(update={
             "rate_limit_per_minute": 0,
@@ -106,9 +108,6 @@ def limited():
             "chat_client_rate_limit_per_minute": 0,
             "llm_daily_limit": 0,
             "internal_api_key": None,
-            "chat_skeleton_enabled": True,
-            "chat_skeleton_first_delay": 0,
-            "chat_skeleton_tokens": 1,
             **values,
         })
         limits = RateLimits(settings)
@@ -173,9 +172,8 @@ def test_chat_limit_per_client(limited):
     assert (first.status_code, second.status_code, other.status_code) == (200, 429, 200)
 
 
-def test_llm_daily_limit(limited, monkeypatch):
-    monkeypatch.setattr("app.pipeline.runner.stream_pipeline", FakePipeline())
-    client = limited(llm_daily_limit=1, chat_skeleton_enabled=False)
+def test_llm_daily_limit(limited):
+    client = limited(llm_daily_limit=1)
     session_id = _new_session(client)
 
     # 없는 세션처럼 시작 전에 거절된 요청은 세지 않음
@@ -190,15 +188,3 @@ def test_llm_daily_limit(limited, monkeypatch):
     assert (missing.status_code, first.status_code, replay.status_code, second.status_code) == (404, 200, 200, 429)
     assert second.json()["message"] == "오늘 이용량이 많아 채팅을 잠시 멈췄어요. 내일 다시 이용해 주세요."
     assert second.headers["content-type"] == "application/json"
-
-
-# 뼈대는 LLM을 부르지 않아 하루 상한에 세지 않음
-def test_skeleton_does_not_count_llm(limited):
-    client = limited(llm_daily_limit=1)
-    session_id = _new_session(client)
-
-    for message_id in (MESSAGE["clientMessageId"], OTHER_MESSAGE_ID):
-        response = client.post(
-            f"/api/sessions/{session_id}/chat", json={**MESSAGE, "clientMessageId": message_id}, headers=HEADERS
-        )
-        assert response.status_code == 200

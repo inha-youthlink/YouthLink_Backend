@@ -7,7 +7,13 @@ from app.api.sessions import get_chat_service
 from app.core.config import get_settings
 from app.core.middleware import SECURITY_HEADERS, BodySizeLimitMiddleware
 from app.main import app
-from tests.conftest import HEADERS, PROFILE, FakeChatRepository, make_service
+from tests.conftest import (
+    HEADERS,
+    PROFILE,
+    FakeChatRepository,
+    FakePipeline,
+    make_service,
+)
 
 ORIGIN_SECRET = "o" * 43
 
@@ -33,8 +39,8 @@ def test_security_headers(client, path):
         assert response.headers[key] == value
 
 
-def test_security_headers_keep_sse_headers(client):
-    _use_settings(chat_skeleton_enabled=True, chat_skeleton_first_delay=0, chat_skeleton_tokens=1)
+def test_security_headers_keep_sse_headers(client, monkeypatch):
+    monkeypatch.setattr("app.pipeline.runner.stream_pipeline", FakePipeline())
     session_id = client.post("/api/sessions", json={"profile": PROFILE}, headers=HEADERS).json()["id"]
 
     response = client.post(
@@ -45,7 +51,7 @@ def test_security_headers_keep_sse_headers(client):
 
     assert response.headers["cache-control"] == "no-cache"
     assert response.headers["x-content-type-options"] == "nosniff"
-    assert response.text.endswith("event: done\ndata: {\"messageId\":\"skeleton-5d7f0a3e-2b1c-4e8f-9a6d-3c2b1a0f9e8d\"}\n\n")
+    assert "event: done\n" in response.text
 
 
 def test_too_large_body_on_public_api(client):
