@@ -1,4 +1,4 @@
--- ETL 저장소 db/schema.sql 복사본 (youthlink-data-pipeline 7c536f7, Titan v2 1024차원·정책 동기화·웹 원문 반영)
+-- ETL 저장소 db/schema.sql 복사본 (youthlink-data-pipeline ccc9381 + 022 추천 에이전트 테이블)
 -- 테스트 DB 구성용. ETL 원본이 바뀌면 함께 갱신함
 
 -- YouthLink Prototype Database Schema
@@ -12,6 +12,172 @@
 -- Run db/extensions.sql before this file.
 
 BEGIN;
+
+CREATE TABLE IF NOT EXISTS schema_migration (
+    migration_name VARCHAR(200) PRIMARY KEY,
+    checksum_sha256 VARCHAR(64) NOT NULL,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    execution_ms INTEGER,
+    CONSTRAINT chk_schema_migration_checksum
+        CHECK (checksum_sha256 ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_schema_migration_execution
+        CHECK (execution_ms IS NULL OR execution_ms >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS policy_pipeline_job (
+    pipeline_job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    status VARCHAR(20) NOT NULL DEFAULT 'RUNNING',
+    current_step VARCHAR(40) NOT NULL,
+    resumed_from_job_id UUID,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ,
+    error_message TEXT,
+    summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+    CONSTRAINT fk_policy_pipeline_resume
+        FOREIGN KEY (resumed_from_job_id)
+        REFERENCES policy_pipeline_job (pipeline_job_id),
+    CONSTRAINT chk_policy_pipeline_status
+        CHECK (status IN ('RUNNING', 'SUCCEEDED', 'FAILED')),
+    CONSTRAINT chk_policy_pipeline_step
+        CHECK (current_step IN (
+            'POLICY_SYNC', 'POLICY_CHUNKS', 'POLICY_EMBEDDINGS',
+            'RAG_PUBLISH', 'VERIFY', 'COMPLETED'
+        )),
+    CONSTRAINT chk_policy_pipeline_finished
+        CHECK (
+            (status = 'RUNNING' AND finished_at IS NULL)
+            OR (status IN ('SUCCEEDED', 'FAILED') AND finished_at IS NOT NULL)
+        )
+);
+
+CREATE INDEX IF NOT EXISTS idx_policy_pipeline_job_started
+    ON policy_pipeline_job (started_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_policy_pipeline_job_status
+    ON policy_pipeline_job (status, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS policy_pipeline_step (
+    pipeline_step_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    pipeline_job_id UUID NOT NULL,
+    step_name VARCHAR(40) NOT NULL,
+    step_order SMALLINT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'RUNNING',
+    command_label TEXT NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ,
+    exit_code INTEGER,
+    output_tail TEXT,
+    CONSTRAINT fk_policy_pipeline_step_job
+        FOREIGN KEY (pipeline_job_id)
+        REFERENCES policy_pipeline_job (pipeline_job_id)
+        ON DELETE CASCADE,
+    CONSTRAINT uq_policy_pipeline_step
+        UNIQUE (pipeline_job_id, step_name),
+    CONSTRAINT chk_policy_pipeline_step_name
+        CHECK (step_name IN (
+            'POLICY_SYNC', 'POLICY_CHUNKS', 'POLICY_EMBEDDINGS',
+            'RAG_PUBLISH', 'VERIFY'
+        )),
+    CONSTRAINT chk_policy_pipeline_step_order
+        CHECK (step_order BETWEEN 1 AND 5),
+    CONSTRAINT chk_policy_pipeline_step_status
+        CHECK (status IN ('RUNNING', 'SUCCEEDED', 'FAILED')),
+    CONSTRAINT chk_policy_pipeline_step_finished
+        CHECK (
+            (status = 'RUNNING' AND finished_at IS NULL AND exit_code IS NULL)
+            OR (
+                status IN ('SUCCEEDED', 'FAILED')
+                AND finished_at IS NOT NULL
+                AND exit_code IS NOT NULL
+            )
+        )
+);
+
+CREATE INDEX IF NOT EXISTS idx_policy_pipeline_step_job
+    ON policy_pipeline_step (pipeline_job_id, step_order);
+
+CREATE TABLE IF NOT EXISTS web_pipeline_job (
+    web_pipeline_job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    status VARCHAR(20) NOT NULL DEFAULT 'RUNNING',
+    current_step VARCHAR(40) NOT NULL,
+    resumed_from_job_id UUID,
+    crawl_limit INTEGER NOT NULL,
+    per_host_limit INTEGER NOT NULL,
+    ai_review_limit INTEGER NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ,
+    error_message TEXT,
+    summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+    CONSTRAINT fk_web_pipeline_resume
+        FOREIGN KEY (resumed_from_job_id)
+        REFERENCES web_pipeline_job (web_pipeline_job_id),
+    CONSTRAINT chk_web_pipeline_status
+        CHECK (status IN ('RUNNING', 'SUCCEEDED', 'FAILED')),
+    CONSTRAINT chk_web_pipeline_step
+        CHECK (current_step IN (
+            'SOURCE_SYNC', 'CRAWL', 'REVALIDATE', 'AI_SHADOW',
+            'AI_APPLY', 'AI_TRIAGE', 'WEB_CHUNKS', 'WEB_EMBEDDINGS',
+            'RAG_PUBLISH', 'VERIFY', 'COMPLETED'
+        )),
+    CONSTRAINT chk_web_pipeline_limits
+        CHECK (
+            crawl_limit > 0
+            AND per_host_limit > 0
+            AND ai_review_limit > 0
+        ),
+    CONSTRAINT chk_web_pipeline_finished
+        CHECK (
+            (status = 'RUNNING' AND finished_at IS NULL)
+            OR (status IN ('SUCCEEDED', 'FAILED') AND finished_at IS NOT NULL)
+        )
+);
+
+CREATE INDEX IF NOT EXISTS idx_web_pipeline_job_started
+    ON web_pipeline_job (started_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_web_pipeline_job_status
+    ON web_pipeline_job (status, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS web_pipeline_step (
+    web_pipeline_step_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    web_pipeline_job_id UUID NOT NULL,
+    step_name VARCHAR(40) NOT NULL,
+    step_order SMALLINT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'RUNNING',
+    command_label TEXT NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ,
+    exit_code INTEGER,
+    output_tail TEXT,
+    CONSTRAINT fk_web_pipeline_step_job
+        FOREIGN KEY (web_pipeline_job_id)
+        REFERENCES web_pipeline_job (web_pipeline_job_id)
+        ON DELETE CASCADE,
+    CONSTRAINT uq_web_pipeline_step
+        UNIQUE (web_pipeline_job_id, step_name),
+    CONSTRAINT chk_web_pipeline_step_name
+        CHECK (step_name IN (
+            'SOURCE_SYNC', 'CRAWL', 'REVALIDATE', 'AI_SHADOW',
+            'AI_APPLY', 'AI_TRIAGE', 'WEB_CHUNKS', 'WEB_EMBEDDINGS',
+            'RAG_PUBLISH', 'VERIFY'
+        )),
+    CONSTRAINT chk_web_pipeline_step_order
+        CHECK (step_order BETWEEN 1 AND 10),
+    CONSTRAINT chk_web_pipeline_step_status
+        CHECK (status IN ('RUNNING', 'SUCCEEDED', 'FAILED')),
+    CONSTRAINT chk_web_pipeline_step_finished
+        CHECK (
+            (status = 'RUNNING' AND finished_at IS NULL AND exit_code IS NULL)
+            OR (
+                status IN ('SUCCEEDED', 'FAILED')
+                AND finished_at IS NOT NULL
+                AND exit_code IS NOT NULL
+            )
+        )
+);
+
+CREATE INDEX IF NOT EXISTS idx_web_pipeline_step_job
+    ON web_pipeline_step (web_pipeline_job_id, step_order);
 
 CREATE TABLE IF NOT EXISTS common_code (
     code            VARCHAR(30) PRIMARY KEY,
@@ -299,6 +465,7 @@ CREATE TABLE IF NOT EXISTS policy_chunk (
 
     embedding           VECTOR(1024),
     embedding_model     VARCHAR(100),
+    embedding_encoding_format VARCHAR(20),
     embedded_at         TIMESTAMPTZ,
     embedding_error     TEXT,
 
@@ -330,12 +497,14 @@ CREATE TABLE IF NOT EXISTS policy_chunk (
             (
                 embedding IS NULL
                 AND embedding_model IS NULL
+                AND embedding_encoding_format IS NULL
                 AND embedded_at IS NULL
             )
             OR
             (
                 embedding IS NOT NULL
                 AND embedding_model IS NOT NULL
+                AND embedding_encoding_format = 'float'
                 AND embedded_at IS NOT NULL
             )
         ),
@@ -591,6 +760,199 @@ COMMENT ON CONSTRAINT fk_policy_web_source_validated_source_document
 CREATE INDEX IF NOT EXISTS idx_policy_web_source_validated_document
     ON policy_web_source (validated_document_id);
 
+CREATE TABLE IF NOT EXISTS policy_web_ai_review (
+    ai_review_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    policy_no             VARCHAR(30) NOT NULL,
+    source_id             UUID NOT NULL,
+    document_id           UUID NOT NULL,
+    content_hash          VARCHAR(64) NOT NULL,
+    policy_evidence_hash  VARCHAR(64) NOT NULL,
+    previous_status       VARCHAR(30) NOT NULL DEFAULT 'REVIEW_REQUIRED',
+
+    model                 VARCHAR(100) NOT NULL,
+    prompt_version        VARCHAR(100) NOT NULL,
+    reviewer_version      VARCHAR(100) NOT NULL,
+    execution_status      VARCHAR(30) NOT NULL,
+
+    page_type             VARCHAR(30),
+    identity_result       VARCHAR(30),
+    raw_response          JSONB,
+    identity_evidence     JSONB NOT NULL DEFAULT '[]'::jsonb,
+    supporting_evidence   JSONB NOT NULL DEFAULT '[]'::jsonb,
+    conflicting_evidence  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    lifecycle_flags       JSONB NOT NULL DEFAULT '[]'::jsonb,
+    rejected_evidence     JSONB NOT NULL DEFAULT '[]'::jsonb,
+
+    proposed_status       VARCHAR(30),
+    proposed_score        NUMERIC(5, 4),
+    verification_result   VARCHAR(30),
+    failure_reason        TEXT NOT NULL,
+    input_token_count     INTEGER,
+    output_token_count    INTEGER,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    applied_at            TIMESTAMPTZ,
+    metadata              JSONB NOT NULL DEFAULT '{}'::jsonb,
+
+    CONSTRAINT fk_policy_web_ai_review_policy
+        FOREIGN KEY (policy_no)
+        REFERENCES policy (policy_no)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_policy_web_ai_review_source_document
+        FOREIGN KEY (source_id, document_id)
+        REFERENCES web_document (source_id, document_id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT chk_policy_web_ai_review_content_hash
+        CHECK (content_hash ~ '^[0-9a-f]{64}$'),
+
+    CONSTRAINT chk_policy_web_ai_review_policy_evidence_hash
+        CHECK (policy_evidence_hash ~ '^[0-9a-f]{64}$'),
+
+    CONSTRAINT chk_policy_web_ai_review_previous_status
+        CHECK (previous_status = 'REVIEW_REQUIRED'),
+
+    CONSTRAINT chk_policy_web_ai_review_versions
+        CHECK (
+            BTRIM(model) <> ''
+            AND BTRIM(prompt_version) <> ''
+            AND BTRIM(reviewer_version) <> ''
+        ),
+
+    CONSTRAINT chk_policy_web_ai_review_execution_status
+        CHECK (execution_status IN ('SUCCEEDED', 'FAILED', 'INVALID_OUTPUT')),
+
+    CONSTRAINT chk_policy_web_ai_review_page_type
+        CHECK (
+            page_type IS NULL
+            OR page_type IN (
+                'DETAIL_SINGLE', 'LISTING_MULTI', 'PORTAL',
+                'ERROR_OR_EMPTY', 'UNKNOWN'
+            )
+        ),
+
+    CONSTRAINT chk_policy_web_ai_review_identity_result
+        CHECK (
+            identity_result IS NULL
+            OR identity_result IN ('EXACT', 'CONFLICT', 'INSUFFICIENT')
+        ),
+
+    CONSTRAINT chk_policy_web_ai_review_json_arrays
+        CHECK (
+            jsonb_typeof(identity_evidence) = 'array'
+            AND jsonb_typeof(supporting_evidence) = 'array'
+            AND jsonb_typeof(conflicting_evidence) = 'array'
+            AND jsonb_typeof(lifecycle_flags) = 'array'
+            AND jsonb_typeof(rejected_evidence) = 'array'
+        ),
+
+    CONSTRAINT chk_policy_web_ai_review_raw_response
+        CHECK (raw_response IS NULL OR jsonb_typeof(raw_response) = 'object'),
+
+    CONSTRAINT chk_policy_web_ai_review_proposed_status
+        CHECK (
+            proposed_status IS NULL
+            OR proposed_status IN ('VERIFIED', 'REVIEW_REQUIRED', 'REJECTED')
+        ),
+
+    CONSTRAINT chk_policy_web_ai_review_proposed_score
+        CHECK (
+            proposed_score IS NULL
+            OR (proposed_score >= 0.0 AND proposed_score <= 1.0)
+        ),
+
+    CONSTRAINT chk_policy_web_ai_review_verification_result
+        CHECK (
+            verification_result IS NULL
+            OR verification_result IN ('ACCEPTED', 'INSUFFICIENT')
+        ),
+
+    CONSTRAINT chk_policy_web_ai_review_execution_state
+        CHECK (
+            (
+                execution_status = 'SUCCEEDED'
+                AND page_type IS NOT NULL
+                AND identity_result IS NOT NULL
+                AND raw_response IS NOT NULL
+                AND proposed_status IS NOT NULL
+                AND proposed_score IS NOT NULL
+                AND (
+                    (
+                        proposed_status IN ('VERIFIED', 'REJECTED')
+                        AND verification_result = 'ACCEPTED'
+                    )
+                    OR (
+                        proposed_status = 'REVIEW_REQUIRED'
+                        AND verification_result = 'INSUFFICIENT'
+                    )
+                )
+            )
+            OR (
+                execution_status IN ('FAILED', 'INVALID_OUTPUT')
+                AND page_type IS NULL
+                AND identity_result IS NULL
+                AND proposed_status IS NULL
+                AND proposed_score IS NULL
+                AND verification_result IS NULL
+                AND jsonb_array_length(identity_evidence) = 0
+                AND jsonb_array_length(supporting_evidence) = 0
+                AND jsonb_array_length(conflicting_evidence) = 0
+                AND jsonb_array_length(lifecycle_flags) = 0
+                AND jsonb_array_length(rejected_evidence) = 0
+            )
+        ),
+
+    CONSTRAINT chk_policy_web_ai_review_failure_reason
+        CHECK (BTRIM(failure_reason) <> ''),
+
+    CONSTRAINT chk_policy_web_ai_review_token_counts
+        CHECK (
+            (input_token_count IS NULL OR input_token_count >= 0)
+            AND (output_token_count IS NULL OR output_token_count >= 0)
+        ),
+
+    CONSTRAINT chk_policy_web_ai_review_metadata
+        CHECK (jsonb_typeof(metadata) = 'object'),
+
+    CONSTRAINT chk_policy_web_ai_review_applied_state
+        CHECK (
+            applied_at IS NULL
+            OR (
+                execution_status = 'SUCCEEDED'
+                AND proposed_status IN ('VERIFIED', 'REJECTED')
+                AND verification_result = 'ACCEPTED'
+            )
+        )
+);
+
+CREATE INDEX IF NOT EXISTS idx_policy_web_ai_review_target
+    ON policy_web_ai_review (policy_no, source_id, document_id, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_policy_web_ai_review_success_cache
+    ON policy_web_ai_review (
+        policy_no,
+        source_id,
+        document_id,
+        content_hash,
+        policy_evidence_hash,
+        model,
+        prompt_version,
+        reviewer_version
+    )
+    WHERE execution_status = 'SUCCEEDED';
+
+CREATE INDEX IF NOT EXISTS idx_policy_web_ai_review_unapplied
+    ON policy_web_ai_review (proposed_status, created_at)
+    WHERE execution_status = 'SUCCEEDED'
+      AND verification_result = 'ACCEPTED'
+      AND applied_at IS NULL;
+
+COMMENT ON TABLE policy_web_ai_review IS
+    'Append-only AI evidence observations for exact REVIEW_REQUIRED document versions; canonical decisions require guarded application.';
+
+COMMENT ON COLUMN policy_web_ai_review.raw_response IS
+    'Parsed JSON returned by the model. It is untrusted until the code verifier accepts exact quotes against the stored document.';
+
 CREATE TABLE IF NOT EXISTS policy_enrichment_fact (
     fact_id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     policy_no              VARCHAR(30) NOT NULL,
@@ -688,6 +1050,7 @@ CREATE TABLE IF NOT EXISTS policy_web_chunk (
     chunker_version        VARCHAR(50) NOT NULL,
     embedding              VECTOR(1024),
     embedding_model        VARCHAR(100),
+    embedding_encoding_format VARCHAR(20),
     token_count            INTEGER,
     embedded_at            TIMESTAMPTZ,
     embedding_error        TEXT,
@@ -733,12 +1096,14 @@ CREATE TABLE IF NOT EXISTS policy_web_chunk (
             (
                 embedding IS NULL
                 AND embedding_model IS NULL
+                AND embedding_encoding_format IS NULL
                 AND embedded_at IS NULL
             )
             OR
             (
                 embedding IS NOT NULL
                 AND embedding_model IS NOT NULL
+                AND embedding_encoding_format = 'float'
                 AND BTRIM(embedding_model) <> ''
                 AND embedded_at IS NOT NULL
                 AND embedding_error IS NULL
@@ -839,7 +1204,8 @@ SELECT
     chunk.token_count,
     chunk.embedded_at,
     chunk.created_at,
-    chunk.updated_at
+    chunk.updated_at,
+    chunk.embedding_encoding_format
 FROM policy_web_chunk AS chunk
 JOIN policy AS policy_row
   ON policy_row.policy_no = chunk.policy_no
@@ -864,6 +1230,153 @@ COMMENT ON TABLE policy_web_chunk IS
 
 COMMENT ON VIEW v_verified_policy_web_chunk IS
     'Current verified crawled-web chunks safe for policy-scoped fallback retrieval.';
+
+-- API and verified web sources stay independent above. This disposable
+-- projection publishes their completed embeddings into one physical HNSW
+-- index so the RAG path needs only one vector search.
+CREATE TABLE IF NOT EXISTS rag_retrieval_chunk (
+    retrieval_chunk_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    policy_no             VARCHAR(30) NOT NULL,
+    source_type           VARCHAR(30) NOT NULL,
+
+    policy_chunk_id       UUID,
+    web_chunk_id          UUID,
+    document_id           UUID,
+    source_id             UUID,
+    canonical_url         TEXT,
+    final_url             TEXT,
+    source_fetched_at     TIMESTAMPTZ,
+
+    chunk_index           INTEGER NOT NULL,
+    chunk_type            VARCHAR(30) NOT NULL,
+    heading               TEXT,
+    content               TEXT NOT NULL,
+    content_hash          VARCHAR(64) NOT NULL,
+    chunker_version       VARCHAR(50) NOT NULL,
+
+    embedding             VECTOR(1024) NOT NULL,
+    embedding_model       VARCHAR(100) NOT NULL,
+    embedding_encoding_format VARCHAR(20) NOT NULL,
+    token_count           INTEGER,
+    embedded_at           TIMESTAMPTZ NOT NULL,
+
+    source_updated_at     TIMESTAMPTZ NOT NULL,
+    source_priority       SMALLINT NOT NULL,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_rag_retrieval_chunk_policy
+        FOREIGN KEY (policy_no)
+        REFERENCES policy (policy_no)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_rag_retrieval_chunk_policy_chunk
+        FOREIGN KEY (policy_chunk_id)
+        REFERENCES policy_chunk (chunk_id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_rag_retrieval_chunk_web_chunk
+        FOREIGN KEY (web_chunk_id)
+        REFERENCES policy_web_chunk (web_chunk_id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_rag_retrieval_chunk_document
+        FOREIGN KEY (document_id)
+        REFERENCES web_document (document_id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_rag_retrieval_chunk_source
+        FOREIGN KEY (source_id)
+        REFERENCES web_source (source_id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT uq_rag_retrieval_chunk_policy_chunk
+        UNIQUE (policy_chunk_id),
+
+    CONSTRAINT uq_rag_retrieval_chunk_web_chunk
+        UNIQUE (web_chunk_id),
+
+    CONSTRAINT chk_rag_retrieval_chunk_origin
+        CHECK (
+            (
+                source_type = 'API'
+                AND policy_chunk_id IS NOT NULL
+                AND web_chunk_id IS NULL
+                AND document_id IS NULL
+                AND source_id IS NULL
+                AND canonical_url IS NULL
+                AND final_url IS NULL
+                AND source_fetched_at IS NULL
+            )
+            OR
+            (
+                source_type = 'CRAWLED_WEB'
+                AND policy_chunk_id IS NULL
+                AND web_chunk_id IS NOT NULL
+                AND document_id IS NOT NULL
+                AND source_id IS NOT NULL
+                AND canonical_url IS NOT NULL
+                AND BTRIM(canonical_url) <> ''
+                AND source_fetched_at IS NOT NULL
+                AND (final_url IS NULL OR BTRIM(final_url) <> '')
+            )
+        ),
+
+    CONSTRAINT chk_rag_retrieval_chunk_type
+        CHECK (
+            (
+                source_type = 'API'
+                AND chunk_type IN (
+                    'SUMMARY', 'ELIGIBILITY', 'SUPPORT', 'APPLICATION'
+                )
+            )
+            OR
+            (
+                source_type = 'CRAWLED_WEB'
+                AND chunk_type = 'WEB_TEXT'
+            )
+        ),
+
+    CONSTRAINT chk_rag_retrieval_chunk_index
+        CHECK (chunk_index >= 0),
+
+    CONSTRAINT chk_rag_retrieval_chunk_content
+        CHECK (BTRIM(content) <> ''),
+
+    CONSTRAINT chk_rag_retrieval_chunk_content_hash
+        CHECK (content_hash ~ '^[0-9a-f]{64}$'),
+
+    CONSTRAINT chk_rag_retrieval_chunk_chunker
+        CHECK (BTRIM(chunker_version) <> ''),
+
+    CONSTRAINT chk_rag_retrieval_chunk_model
+        CHECK (BTRIM(embedding_model) <> ''),
+
+    CONSTRAINT chk_rag_retrieval_chunk_encoding_format
+        CHECK (embedding_encoding_format = 'float'),
+
+    CONSTRAINT chk_rag_retrieval_chunk_token_count
+        CHECK (token_count IS NULL OR token_count >= 0),
+
+    CONSTRAINT chk_rag_retrieval_chunk_priority
+        CHECK (source_priority BETWEEN 0 AND 1000)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rag_retrieval_chunk_policy_source
+    ON rag_retrieval_chunk (policy_no, source_type);
+
+CREATE INDEX IF NOT EXISTS idx_rag_retrieval_chunk_embedding_hnsw
+    ON rag_retrieval_chunk
+    USING hnsw (embedding vector_cosine_ops);
+
+COMMENT ON TABLE rag_retrieval_chunk IS
+    'Disposable single-index RAG projection of active API chunks and current verified crawled-web chunks.';
+
+COMMENT ON COLUMN rag_retrieval_chunk.source_type IS
+    'Origin corpus: API or CRAWLED_WEB.';
+
+COMMENT ON COLUMN rag_retrieval_chunk.source_priority IS
+    'Source-aware reranking priority; similarity remains the primary retrieval signal.';
 
 CREATE TABLE IF NOT EXISTS chat_room (
     room_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -999,6 +1512,66 @@ CREATE TABLE IF NOT EXISTS chat_current_policy (
     CONSTRAINT chk_chat_current_policy_order
         CHECK (display_order >= 1)
 );
+
+-- Recommendation agent conversation, kept apart from chat_message so the
+-- chat history and the agent panel never mix. Rows go with the chat room.
+CREATE TABLE IF NOT EXISTS chat_agent_message (
+    message_id      BIGSERIAL PRIMARY KEY,
+    room_id         UUID NOT NULL,
+    role            VARCHAR(20) NOT NULL,
+    content         TEXT NOT NULL,
+    -- Choice question and chip options shown under an assistant message
+    question        TEXT,
+    options         JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- Tool calls, viewed policy numbers and trace (not returned to clients)
+    metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- TRUE only when this answer replaced the card list
+    cards_changed   BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_chat_agent_message_room
+        FOREIGN KEY (room_id)
+        REFERENCES chat_room (room_id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT chk_chat_agent_message_role
+        CHECK (role IN ('user', 'assistant')),
+
+    CONSTRAINT chk_chat_agent_message_options
+        CHECK (jsonb_typeof(options) = 'array')
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_agent_message_room
+    ON chat_agent_message (room_id, message_id);
+
+-- Cards of an answer that changed them (up to 5, with the agent's reason)
+CREATE TABLE IF NOT EXISTS chat_agent_policy_ref (
+    message_id      BIGINT NOT NULL,
+    policy_no       VARCHAR(30) NOT NULL,
+    display_order   SMALLINT NOT NULL,
+    reason          TEXT,
+
+    PRIMARY KEY (message_id, policy_no),
+
+    CONSTRAINT fk_chat_agent_policy_ref_message
+        FOREIGN KEY (message_id)
+        REFERENCES chat_agent_message (message_id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_chat_agent_policy_ref_policy
+        FOREIGN KEY (policy_no)
+        REFERENCES policy (policy_no)
+        ON DELETE CASCADE,
+
+    CONSTRAINT uq_chat_agent_policy_ref_order
+        UNIQUE (message_id, display_order),
+
+    CONSTRAINT chk_chat_agent_policy_ref_order
+        CHECK (display_order BETWEEN 1 AND 5)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_agent_policy_ref_policy
+    ON chat_agent_policy_ref (policy_no);
 
 CREATE TABLE IF NOT EXISTS policy_scrap (
     user_id         VARCHAR(100) NOT NULL,
