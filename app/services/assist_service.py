@@ -11,6 +11,7 @@ from app.core.rate_limit import RateLimits
 from app.pipeline.conditions import SearchConditions
 from app.pipeline.prompts import load_prompt
 from app.repositories.chat_repository import ChatRepository, RoomRecord
+from app.repositories.policy_repository import PolicyRepository
 from app.schemas.analysis import Category
 from app.schemas.pipeline import ConversationTurn
 from app.schemas.policy_info import CATEGORY_NAMES, today_kst
@@ -85,25 +86,29 @@ class AssistService:
         category = conversation_category(
             await self._chat_repository.list_recent_categories(room_id, self._deps.settings.history_turns)
         )
-        # 마감은 신청할 수 없어 빼고, 신청 가능한 정책 먼저 (진행 중 → 상시 → 예정 → 정보 없음, 계약 4.2)
-        policy_filter = replace(
-            conditions.to_filter(),
-            exclude_closed=True,
-            large_categories=tuple(sorted(CATEGORY_NAMES[category])) if category else (),
-        )
-
-        today = today_kst()
-        records, _ = await policy_repository.search(
-            policy_filter, today, 0, MAX_RECOMMENDATIONS, available_first=True
-        )
-        labels = await policy_repository.get_region_labels([record.policy_no for record in records])
-        return [
-            PolicySummary.from_item(record.to_item(0.0, today, labels.get(record.policy_no)))
-            for record in records
-        ]
+        return await profile_recommendations(policy_repository, conditions, category, MAX_RECOMMENDATIONS)
 
     async def _profile_conditions(self, room: RoomRecord) -> SearchConditions:
         return await profile_conditions(room, self._deps.policy_repository, self._deps.common_code_repository)
+
+
+# 추천 정책과 추천 에이전트 시작 카드(계약 4.8, 분야 없이)가 같은 기준을 쓰도록 한 곳에 둠
+# 마감은 신청할 수 없어 빼고, 신청 가능한 정책 먼저 (진행 중 → 상시 → 예정 → 정보 없음, 계약 4.2)
+async def profile_recommendations(
+    policy_repository: PolicyRepository, conditions: SearchConditions, category: Category | None, limit: int
+) -> list[PolicySummary]:
+    policy_filter = replace(
+        conditions.to_filter(),
+        exclude_closed=True,
+        large_categories=tuple(sorted(CATEGORY_NAMES[category])) if category else (),
+    )
+    today = today_kst()
+    records, _ = await policy_repository.search(policy_filter, today, 0, limit, available_first=True)
+    labels = await policy_repository.get_region_labels([record.policy_no for record in records])
+    return [
+        PolicySummary.from_item(record.to_item(0.0, today, labels.get(record.policy_no)))
+        for record in records
+    ]
 
 
 # 오래된 턴부터. 답변은 앞부분만, 카드는 정책 이름만

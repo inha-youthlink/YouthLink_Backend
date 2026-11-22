@@ -4,13 +4,14 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.api import guides, health, internal, policies, regions, scraps, sessions
+from app.api import agent, guides, health, internal, policies, regions, scraps, sessions
 from app.core.config import get_settings
 from app.core.dependencies import limit_public_requests, verify_origin
 from app.core.errors import register_error_handlers
 from app.core.middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from app.llm.client import LLMClient
 from app.pipeline.retrieval.factory import create_retriever
+from app.repositories.agent_repository import AgentRepository
 from app.repositories.chat_repository import ChatRepository
 from app.repositories.common_code_repository import CommonCodeRepository
 from app.repositories.policy_repository import PolicyRepository
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.common_code_repository = CommonCodeRepository(app.state.session_factory)
     app.state.chat_repository = ChatRepository(app.state.session_factory)
     app.state.scrap_repository = ScrapRepository(app.state.session_factory)
+    app.state.agent_repository = AgentRepository(app.state.session_factory)
     app.state.retriever = create_retriever(
         settings.retriever,
         app.state.llm,
@@ -68,6 +70,7 @@ app.include_router(internal.router)
 # 공개 라우터는 여기서 출처 확인과 IP 요청 제한을 함께 붙임. /internal(평가 서버)과 /health(헬스 체크)는 제외
 PUBLIC_DEPENDENCIES = [Depends(verify_origin), Depends(limit_public_requests)]
 app.include_router(sessions.router, dependencies=PUBLIC_DEPENDENCIES)
+app.include_router(agent.router, dependencies=PUBLIC_DEPENDENCIES)
 app.include_router(policies.router, dependencies=PUBLIC_DEPENDENCIES)
 app.include_router(regions.router, dependencies=PUBLIC_DEPENDENCIES)
 app.include_router(scraps.router, dependencies=PUBLIC_DEPENDENCIES)
