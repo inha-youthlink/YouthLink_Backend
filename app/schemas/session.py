@@ -11,7 +11,7 @@ from app.schemas.pipeline import PolicyItem
 from app.schemas.policy_info import ApplicationStatus
 from app.schemas.public import KstDateTime, PublicModel
 
-# 프로필 enum 이름과 값은 계약 v0.3 §2.3을 따름. DB 공통코드와의 대응은 services/profile_codes.py
+# 프로필 enum 이름과 값은 계약 2.3을 따름. DB 공통코드와의 대응은 services/profile_codes.py
 
 
 class MaritalStatus(StrEnum):
@@ -66,7 +66,7 @@ class SpecialField(StrEnum):
     NONE = "NONE"
 
 
-# 정책 데이터 대분류와 1:1 (계약 H1). 데이터에서 금융과 복지가 나뉘지 않아 FINANCE는 없음
+# 정책 데이터 대분류와 1:1 (계약 2.1). 데이터에서 금융과 복지가 나뉘지 않아 FINANCE는 없음
 class PolicyCategory(StrEnum):
     JOB = "JOB"
     HOUSING = "HOUSING"
@@ -82,28 +82,6 @@ POLICY_CATEGORIES = {
     Category.WELFARE_CULTURE: PolicyCategory.WELFARE,
     Category.PARTICIPATION: PolicyCategory.PARTICIPATION,
 }
-
-# 과도기 호환: 프론트가 regionLabel로 바꾸기 전까지 v0.3 카드의 region(시도 enum)을 함께 보냄. 바뀌면 삭제
-# 광주·전남은 통합특별시 하나라 v0.3 값 중 하나로만 보낼 수 있음
-LEGACY_CARD_REGIONS = {
-    "서울특별시": "SEOUL",
-    "부산광역시": "BUSAN",
-    "대구광역시": "DAEGU",
-    "인천광역시": "INCHEON",
-    "전남광주통합특별시": "JEONNAM",
-    "대전광역시": "DAEJEON",
-    "울산광역시": "ULSAN",
-    "세종특별자치시": "SEJONG",
-    "경기도": "GYEONGGI",
-    "강원특별자치도": "GANGWON",
-    "충청북도": "CHUNGBUK",
-    "충청남도": "CHUNGNAM",
-    "전북특별자치도": "JEONBUK",
-    "경상북도": "GYEONGBUK",
-    "경상남도": "GYEONGNAM",
-    "제주특별자치도": "JEJU",
-}
-NATIONWIDE = "NATIONWIDE"
 
 
 # 계약상 8항목 모두 필수. region은 5자리 지역 코드이고, 형식·존재 확인은 지역 표가 필요해 서비스에서 함
@@ -131,7 +109,7 @@ class SessionProfile(PublicModel):
     special_field: SpecialField | None
 
 
-# 세션 관심 분야(category)는 받지 않음 (계약 B3). v0.3 프론트가 보내도 모르는 필드라 무시됨
+# 세션 관심 분야(category)는 받지 않음 (계약 4.1). 보내도 모르는 필드라 무시됨
 class CreateSessionRequest(PublicModel):
     profile: SessionProfileRequest
 
@@ -152,8 +130,6 @@ class PolicySummary(PublicModel):
     apply_end: date | None
     status: ApplicationStatus | None
     region_label: str | None
-    # 과도기 호환 (LEGACY_CARD_REGIONS)
-    region: str
     organization: str | None
     source_url: str | None
 
@@ -167,17 +143,9 @@ class PolicySummary(PublicModel):
             apply_end=item.application_end_date,
             status=item.application_status,
             region_label=item.region_label,
-            region=legacy_card_region(item.region_label),
             organization=item.supervising_org_name,
             source_url=item.application_url,
         )
-
-
-# "서울특별시 강남구", "경기도 5곳"은 그 시도, "전국"·"서울특별시 외 14개 시도"는 시도 하나로 나타낼 수 없어 전국
-def legacy_card_region(region_label: str | None) -> str:
-    if not region_label or " 외 " in region_label:
-        return NATIONWIDE
-    return LEGACY_CARD_REGIONS.get(region_label.split()[0], NATIONWIDE)
 
 
 class Message(PublicModel):

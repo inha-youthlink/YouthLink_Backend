@@ -64,16 +64,12 @@ def test_create_session(client, repo):
     )
 
 
-# 과도기 호환: v0.3 프론트가 보내는 세션 분야는 무시하고, 시도 enum은 "○○ 전체" 코드로 받음
-def test_create_session_accepts_v03_request(client):
-    body = _create(client, profile={**PROFILE, "region": "SEOUL"})
-    response = client.post(
-        "/api/sessions", json={"category": "HOUSING", "profile": {**PROFILE, "region": "GYEONGGI"}}, headers=HEADERS
-    )
+# 세션 분야는 모르는 필드라 무시함 (계약 4.1)
+def test_create_session_ignores_category(client):
+    response = client.post("/api/sessions", json={"category": "HOUSING", "profile": PROFILE}, headers=HEADERS)
 
-    assert body["profile"]["region"] == "11000"
     assert response.status_code == 201
-    assert response.json()["profile"]["region"] == "41000"
+    assert "category" not in response.json()
 
 
 @pytest.mark.parametrize("region", ["11680", "11000", "41110", "41113"])
@@ -81,7 +77,7 @@ def test_create_session_region_codes(client, region):
     assert _create(client, profile={**PROFILE, "region": region})["profile"]["region"] == region
 
 
-@pytest.mark.parametrize("region", ["99999", "11999", "1168", "강남구"])
+@pytest.mark.parametrize("region", ["99999", "11999", "1168", "강남구", "SEOUL"])
 def test_create_session_rejects_unknown_region(client, region):
     response = client.post("/api/sessions", json={"profile": {**PROFILE, "region": region}}, headers=HEADERS)
 
@@ -260,7 +256,6 @@ def test_list_messages(client, repo):
             "applyEnd": "2026-11-30",
             "status": "OPEN",
             "regionLabel": "서울특별시",
-            "region": "SEOUL",
             "organization": "서울특별시",
             "sourceUrl": "https://example.com",
         }

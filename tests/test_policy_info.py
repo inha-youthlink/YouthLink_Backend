@@ -11,7 +11,6 @@ from app.schemas.policy_info import (
     category_of,
     clean_url,
 )
-from app.schemas.session import legacy_card_region
 
 TODAY = date(2026, 10, 23)
 PERIOD_CODE = "0057001"
@@ -68,19 +67,3 @@ def test_clean_url(value, expected):
 )
 def test_category_of(names, expected):
     assert category_of(names) == expected
-
-
-@pytest.mark.parametrize(
-    ("label", "expected"),
-    [
-        ("서울특별시 강남구", "SEOUL"),
-        ("경기도 5곳", "GYEONGGI"),
-        ("전북특별자치도", "JEONBUK"),
-        ("전남광주통합특별시 북구", "JEONNAM"),
-        ("서울특별시 외 14개 시도", "NATIONWIDE"),
-        ("전국", "NATIONWIDE"),
-        (None, "NATIONWIDE"),
-    ],
-)
-def test_legacy_card_region(label, expected):
-    assert legacy_card_region(label) == expected

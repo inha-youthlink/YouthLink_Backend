@@ -11,15 +11,10 @@ PAGE_SIZE_MAX = 50
 # policy.policy_no 컬럼 길이
 POLICY_ID_MAX_CHARS = 30
 
-# 과도기 호환: v0.3 프론트의 FINANCE는 데이터에서 복지와 한 묶음이라 WELFARE로 받음. 프론트가 바뀌면 삭제
-LEGACY_SEARCH_CATEGORIES = {"FINANCE": PolicyCategory.WELFARE}
-
 
 # 빈 값(category=)은 검색어와 같이 조건 없음으로 봄
 def _search_category(value: object) -> object:
-    if value == "":
-        return None
-    return LEGACY_SEARCH_CATEGORIES.get(value, value) if isinstance(value, str) else value
+    return None if value == "" else value
 
 
 SearchCategory = Annotated[PolicyCategory | None, BeforeValidator(_search_category)]
@@ -47,7 +42,7 @@ class PolicyDetail(PolicySummary):
     required_documents: str
 
 
-# 스크랩 (계약 §4.5, v0.3 그대로). 카드는 채팅·검색과 같은 PolicySummary
+# 스크랩 (계약 4.6). 카드는 채팅·검색과 같은 PolicySummary
 class Scrap(PublicModel):
     policy: PolicySummary
     created_at: KstDateTime
@@ -55,4 +50,9 @@ class Scrap(PublicModel):
 
 class ScrapRequest(PublicModel):
     # policy.policy_no 컬럼 길이(VARCHAR(30)). 앞뒤 공백은 지움
+    policy_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=POLICY_ID_MAX_CHARS)]
+
+
+# 채팅에서 이야기할 정책 지정 (계약 4.9). 형식 검사는 스크랩·가이드와 같음
+class CurrentPolicyRequest(PublicModel):
     policy_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=POLICY_ID_MAX_CHARS)]

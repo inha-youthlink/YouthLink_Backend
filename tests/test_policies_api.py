@@ -197,7 +197,6 @@ def test_search_page(client, repo):
         "applyEnd": "2099-12-31",
         "status": "OPEN",
         "regionLabel": "서울특별시",
-        "region": "SEOUL",
         "organization": "서울특별시",
         "sourceUrl": "https://www.example.com",
     }]
@@ -231,8 +230,6 @@ def test_blank_values_mean_no_condition(client, repo, params):
     ("HOUSING", ("주거",)),
     # 옛 분류 이름도 함께
     ("WELFARE", ("금융･복지･문화", "복지문화")),
-    # 과도기 호환: v0.3 FINANCE는 WELFARE
-    ("FINANCE", ("금융･복지･문화", "복지문화")),
 ])
 def test_search_category(client, repo, category, names):
     response = _search(client, category=category)
@@ -247,8 +244,6 @@ def test_search_category(client, repo, category, names):
     # 구가 있는 시는 시 코드와 구 코드 모두 그 시 전체
     ("41110", "41", ("41111", "41113")),
     ("41113", "41", ("41111", "41113")),
-    # 과도기 호환: v0.3 시도 enum
-    ("SEOUL", "11", ()),
 ])
 def test_search_region_scope(client, repo, region, sido_code, codes):
     response = _search(client, region=region)
@@ -261,6 +256,9 @@ def test_search_region_scope(client, repo, region, sido_code, codes):
 @pytest.mark.parametrize(("params", "field"), [
     ({"keyword": "가" * 51}, "keyword"),
     ({"category": "FOOD"}, "category"),
+    # v0.3 값은 계약 v1.4부터 받지 않음
+    ({"category": "FINANCE"}, "category"),
+    ({"region": "SEOUL"}, "region"),
     ({"region": "99999"}, "region"),
     ({"region": "11999"}, "region"),
     ({"region": "BUSAN"}, "region"),

@@ -91,7 +91,7 @@ def test_add_scrap_created_then_existing(client):
     # 카드는 채팅·검색과 같은 형식
     assert body["policy"] == {
         "id": "P-1", "title": "정책 P-1", "category": "HOUSING", "applyStart": None, "applyEnd": None,
-        "status": "ALWAYS_OPEN", "regionLabel": "서울특별시", "region": "SEOUL",
+        "status": "ALWAYS_OPEN", "regionLabel": "서울특별시",
         "organization": "서울특별시", "sourceUrl": None,
     }
 
