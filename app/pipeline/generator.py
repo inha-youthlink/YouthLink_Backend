@@ -68,6 +68,8 @@ class GenerationResult:
     card_numbers: list[int] | None
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    # LLM 스트림 사용량·시각 (응답 속도 측정용, LLM을 부르지 않은 답변은 기본값)
+    usage: ChatUsage | None = None
 
 
 @dataclass(frozen=True)
@@ -160,6 +162,7 @@ async def generate_stream(ctx: PipelineContext) -> AsyncGenerator[GenerationEven
         card_numbers=numbers,
         prompt_tokens=usage.prompt_tokens,
         completion_tokens=usage.completion_tokens,
+        usage=usage,
     )
 
 

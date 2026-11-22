@@ -59,12 +59,19 @@ class AnalysisResult:
     model: str
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
 
     def to_trace(self) -> dict[str, Any]:
         return {
             "prompt_version": self.prompt_version,
             "model": self.model,
-            "tokens": {"prompt": self.prompt_tokens, "completion": self.completion_tokens},
+            "tokens": {
+                "prompt": self.prompt_tokens,
+                "completion": self.completion_tokens,
+                "cached": self.cached_tokens,
+                "reasoning": self.reasoning_tokens,
+            },
             "sub_queries": [
                 {
                     "standalone_question": sub.standalone_question,
@@ -135,6 +142,8 @@ async def analyze(ctx: PipelineContext) -> AnalysisResult:
         model=llm.analysis_model,
         prompt_tokens=result.prompt_tokens,
         completion_tokens=result.completion_tokens,
+        cached_tokens=result.cached_tokens,
+        reasoning_tokens=result.reasoning_tokens,
     )
 
 

@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any
 
 from openai import AsyncOpenAI, OpenAIError
@@ -21,6 +22,13 @@ class ChatResult:
 class ChatUsage:
     prompt_tokens: int
     completion_tokens: int
+    # 아래는 응답 속도 측정용. 게이트웨이가 주지 않으면 0·None
+    # 프롬프트 캐시에 맞은 입력 토큰, 출력 전 추론 토큰
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
+    # 요청부터 첫 이벤트(응답 시작)·첫 글자까지 ms. 둘의 차이가 대부분 추론 시간
+    first_event_ms: int | None = None
+    first_text_ms: int | None = None
 
 
 # 스트림 도중 실패도 한 번에 받을 때와 같은 오류(OpenAIError)로 처리되게 함
@@ -34,6 +42,8 @@ class ParsedResult[T: BaseModel]:
     parsed: T | None
     prompt_tokens: int
     completion_tokens: int
+    cached_tokens: int = 0
+    reasoning_tokens: int = 0
 
 
 # 문서 임베딩(ETL)은 실수라 이진 질문 벡터로 검색하면 결과가 틀어짐. 조용히 검색하지 않고 실패시킴
@@ -144,6 +154,9 @@ class LLMClient:
     # 글자 조각(str)을 받는 대로 내보내고 마지막에 ChatUsage를 내보냄
     # 소비하는 쪽이 멈추면(연결 끊김) async with가 스트림을 닫아 생성도 멈춤
     async def chat_stream(self, messages: list[dict[str, str]]) -> AsyncGenerator[str | ChatUsage, None]:
+        started = perf_counter()
+        first_event_ms: int | None = None
+        first_text_ms: int | None = None
         stream = await self._client.responses.create(
             model=self.chat_model,
             input=messages,
@@ -151,14 +164,23 @@ class LLMClient:
         )
         async with stream:
             async for event in stream:
+                if first_event_ms is None:
+                    first_event_ms = _elapsed_ms(started)
                 if event.type == "response.output_text.delta":
+                    if first_text_ms is None:
+                        first_text_ms = _elapsed_ms(started)
                     yield event.delta
                 # 길이 상한으로 끊긴 응답(incomplete)도 chat()처럼 받은 글자까지 답변으로 씀
                 elif event.type in ("response.completed", "response.incomplete"):
                     usage = event.response.usage
+                    cached_tokens, reasoning_tokens = _token_details(usage)
                     yield ChatUsage(
                         prompt_tokens=usage.input_tokens if usage else 0,
                         completion_tokens=usage.output_tokens if usage else 0,
+                        cached_tokens=cached_tokens,
+                        reasoning_tokens=reasoning_tokens,
+                        first_event_ms=first_event_ms,
+                        first_text_ms=first_text_ms,
                     )
                 elif event.type in ("response.failed", "error"):
                     raise LLMStreamError(f"답변 스트림 실패: {event.type}")
@@ -172,10 +194,13 @@ class LLMClient:
             text_format=text_format,
         )
         usage = response.usage
+        cached_tokens, reasoning_tokens = _token_details(usage)
         return ParsedResult(
             parsed=response.output_parsed,
             prompt_tokens=usage.input_tokens if usage else 0,
             completion_tokens=usage.output_tokens if usage else 0,
+            cached_tokens=cached_tokens,
+            reasoning_tokens=reasoning_tokens,
         )
 
     # 답변 모델로 구조화 출력을 받음 (신청 가이드). 분석과 달리 입력이 길어 시간 제한을 따로 줌
@@ -259,3 +284,17 @@ def _arguments(raw: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _elapsed_ms(started: float) -> int:
+    return int((perf_counter() - started) * 1000)
+
+
+# 게이트웨이(Bedrock 경유)가 세부 토큰을 주지 않을 수 있어 없으면 0
+def _token_details(usage: Any) -> tuple[int, int]:
+    input_details = getattr(usage, "input_tokens_details", None)
+    output_details = getattr(usage, "output_tokens_details", None)
+    return (
+        getattr(input_details, "cached_tokens", None) or 0,
+        getattr(output_details, "reasoning_tokens", None) or 0,
+    )

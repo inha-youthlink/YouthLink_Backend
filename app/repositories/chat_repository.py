@@ -67,6 +67,15 @@ WHERE r.message_id = ANY(:message_ids)
 ORDER BY r.message_id, r.display_order
 """)
 
+# 대화 기록(분석 입력)에는 정책 번호·이름만 필요해 지역 표시·신청 상태를 계산하지 않음
+_LIST_TURN_POLICIES_SQL = text("""
+SELECT r.message_id, p.policy_no, p.policy_name
+FROM message_policy_ref r
+JOIN policy p ON p.policy_no = r.policy_no
+WHERE r.message_id = ANY(:message_ids)
+ORDER BY r.message_id, r.display_order
+""")
+
 # 답변이 가리키는 질문으로 짝을 지어, 답변 없이 남은 질문(연결 끊김, 생성 실패)은 대화 기록에서 빠짐
 # 최근 답변을 역순으로 자른 뒤 다시 시간순으로 돌려 오래된 턴부터 반환함
 _LIST_RECENT_TURNS_SQL = text("""
@@ -247,20 +256,19 @@ class ChatRepository:
         if turns <= 0:
             return []
 
+        refs: dict[int, list[PolicyRef]] = {}
         async with self._session_factory() as session:
             result = await session.execute(_LIST_RECENT_TURNS_SQL, {"room_id": room_id, "limit": turns})
             rows = result.mappings().all()
-
-        refs = await self.list_policy_refs([row["answer_id"] for row in rows])
-        return [
-            ConversationTurn(
-                question=row["question"],
-                answer=row["answer"],
-                policies=[
-                    PolicyRef(policy_no=policy.policy_no, policy_name=policy.policy_name)
-                    for policy in refs.get(row["answer_id"], [])
-                ],
+            policies = await session.execute(
+                _LIST_TURN_POLICIES_SQL, {"message_ids": [row["answer_id"] for row in rows]}
             )
+            for ref in policies.mappings():
+                refs.setdefault(ref["message_id"], []).append(
+                    PolicyRef(policy_no=ref["policy_no"], policy_name=ref["policy_name"])
+                )
+        return [
+            ConversationTurn(question=row["question"], answer=row["answer"], policies=refs.get(row["answer_id"], []))
             for row in rows
         ]
 

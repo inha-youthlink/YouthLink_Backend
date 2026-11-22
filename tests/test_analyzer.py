@@ -219,7 +219,7 @@ async def test_trace_after_success():
     assert json.loads(json.dumps(trace)) == {
         "prompt_version": "analyze_v9",
         "model": "fake-analysis-model",
-        "tokens": {"prompt": 100, "completion": 20},
+        "tokens": {"prompt": 100, "completion": 20, "cached": 0, "reasoning": 0},
         "sub_queries": [{
             "standalone_question": "청년 이사비 지원 신청 방법",
             "search_query": "청년 이사비 지원 신청 방법",
@@ -247,7 +247,7 @@ async def test_trace_after_failure():
 
     assert trace["sub_queries"] == []
     assert trace["fallback_reason"] == "llm_error"
-    assert trace["tokens"] == {"prompt": 0, "completion": 0}
+    assert trace["tokens"] == {"prompt": 0, "completion": 0, "cached": 0, "reasoning": 0}
 
 
 # 비교 대상 수가 라우팅 규칙이라 빈 값·중복만 정리하고 셋 이상이어도 남김

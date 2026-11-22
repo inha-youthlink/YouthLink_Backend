@@ -93,14 +93,44 @@ FROM region
 WHERE is_active
 """)
 
+# 범위 View(v_policy_*_scope)와 같은 계산을 요청한 정책만 해석 View에서 함. 범위 View는 전체 정책을 집계해 약 0.3초 걸림
 _GET_REGION_SCOPES_SQL = text("""
-SELECT s.policy_no, r.region_scope, s.sido_name, s.sido_scope, s.resolved_active_region_count,
-       (SELECT count(DISTINCT sido_code) FROM region WHERE is_active) AS total_sidos,
-       (SELECT min(v.region_name) FROM v_policy_region_resolved v
-        WHERE v.policy_no = s.policy_no AND v.sido_code = s.sido_code AND v.is_active) AS region_name
-FROM v_policy_sido_scope s
-JOIN v_policy_region_scope r USING (policy_no)
-WHERE s.policy_no = ANY(:policy_nos)
+WITH resolved AS (
+    SELECT policy_no, resolved_region_code, sido_code, region_name, is_active, resolution_type
+    FROM v_policy_region_resolved
+    WHERE policy_no = ANY(:policy_nos)
+),
+policy_stats AS (
+    SELECT policy_no,
+           count(DISTINCT resolved_region_code) FILTER (WHERE is_active) AS active_count,
+           count(*) FILTER (WHERE resolution_type = 'UNRESOLVED' OR NOT is_active) AS unknown_count
+    FROM resolved
+    GROUP BY policy_no
+),
+sido_stats AS (
+    SELECT policy_no, sido_code, count(DISTINCT resolved_region_code) AS region_count, min(region_name) AS region_name
+    FROM resolved
+    WHERE is_active AND resolution_type <> 'UNRESOLVED'
+    GROUP BY policy_no, sido_code
+),
+sido_total AS (
+    SELECT sido_code, min(sido_name) AS sido_name, count(*) AS region_count
+    FROM region
+    WHERE is_active
+    GROUP BY sido_code
+)
+SELECT s.policy_no,
+       CASE WHEN p.unknown_count > 0 THEN 'UNKNOWN'
+            WHEN p.active_count = (SELECT count(*) FROM region WHERE is_active) THEN 'NATIONWIDE'
+            ELSE 'PARTIAL' END AS region_scope,
+       t.sido_name,
+       CASE WHEN s.region_count = t.region_count THEN 'SIDO_WIDE' ELSE 'PARTIAL' END AS sido_scope,
+       s.region_count AS resolved_active_region_count,
+       (SELECT count(*) FROM sido_total) AS total_sidos,
+       s.region_name
+FROM sido_stats s
+JOIN sido_total t USING (sido_code)
+JOIN policy_stats p USING (policy_no)
 ORDER BY s.policy_no, s.sido_code
 """)
 

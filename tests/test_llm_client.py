@@ -1,3 +1,4 @@
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -51,6 +52,10 @@ def _done(kind: str = "response.completed", usage=USAGE):
     return SimpleNamespace(type=kind, response=SimpleNamespace(usage=usage))
 
 
+def _without_timing(usage: ChatUsage) -> ChatUsage:
+    return replace(usage, first_event_ms=None, first_text_ms=None)
+
+
 async def _collect(client: LLMClient) -> list:
     return [piece async for piece in client.chat_stream([{"role": "user", "content": "q"}])]
 
@@ -62,16 +67,38 @@ async def test_chat_stream_yields_deltas_then_usage():
         SimpleNamespace(type="response.output_text.done"), _done(),
     )
 
-    assert await _collect(client) == ["청년 ", "월세", ChatUsage(prompt_tokens=31, completion_tokens=104)]
+    *pieces, usage = await _collect(client)
+
+    assert pieces == ["청년 ", "월세"]
+    assert _without_timing(usage) == ChatUsage(prompt_tokens=31, completion_tokens=104)
+    # 시각은 fake라 0에 가깝고, 이벤트가 왔으면 값이 있음
+    assert usage.first_event_ms is not None and usage.first_text_ms is not None
     assert (responses.kwargs["model"], responses.kwargs["stream"]) == ("chat-model", True)
     assert responses.stream.closed
+
+
+# 캐시·추론 토큰은 세부 항목이 있을 때만 꺼냄 (게이트웨이가 안 주면 0)
+async def test_chat_stream_reports_cached_and_reasoning_tokens():
+    usage = SimpleNamespace(
+        input_tokens=8000, output_tokens=900,
+        input_tokens_details=SimpleNamespace(cached_tokens=6144),
+        output_tokens_details=SimpleNamespace(reasoning_tokens=512),
+    )
+    client, _ = _client(_delta("답"), _done(usage=usage))
+
+    *_, result = await _collect(client)
+
+    assert (result.cached_tokens, result.reasoning_tokens) == (6144, 512)
 
 
 # 길이 상한으로 끊긴 응답도 한 번에 받을 때처럼 받은 글자까지 씀
 async def test_incomplete_response_keeps_text():
     client, _ = _client(_delta("일부"), _done("response.incomplete", usage=None))
 
-    assert await _collect(client) == ["일부", ChatUsage(prompt_tokens=0, completion_tokens=0)]
+    *pieces, usage = await _collect(client)
+
+    assert pieces == ["일부"]
+    assert _without_timing(usage) == ChatUsage(prompt_tokens=0, completion_tokens=0)
 
 
 @pytest.mark.parametrize("kind", ["response.failed", "error"])
