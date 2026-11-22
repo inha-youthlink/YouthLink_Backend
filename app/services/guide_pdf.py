@@ -1,5 +1,6 @@
 import re
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from functools import lru_cache
@@ -7,7 +8,7 @@ from pathlib import Path
 
 from fontTools.ttLib import TTFont
 from fpdf import FPDF
-from fpdf.enums import XPos, YPos
+from fpdf.enums import MethodReturnValue, XPos, YPos
 from fpdf.fonts import FontFace
 
 # 신청 가이드 PDF 조립. 내용은 guide_service가 정하고 여기서는 배치만 함 (LLM·DB 없음)
@@ -28,6 +29,9 @@ LINE_HEIGHT = 6
 # 제목(약 10mm) + 내용 3줄
 HEADING_KEEP_HEIGHT = 30
 NOTICE_KEEP_HEIGHT = 45
+# 이보다 짧은 절은 쪽 끝에서 잘릴 것 같으면 통째로 다음 쪽에서 시작 (조건·서류 체크리스트를 한 쪽에서 보게)
+# 긴 절은 넘겨도 어차피 잘려 빈 공간만 생기므로 이어서 씀
+KEEP_SECTION_RATIO = 0.5
 CELL_PADDING = (1.5, 2)
 # fpdf2 표는 한 행을 여러 페이지로 나누지 못해, 한 칸이 페이지를 넘지 않을 길이로 자름 (단계·용어 설명은 보통 100자 안쪽)
 CELL_MAX_CHARS = 400
@@ -91,46 +95,50 @@ def render_guide_pdf(content: GuideContent) -> bytes:
 
     sections = _Sections(pdf)
 
-    sections.start("신청 방법")
-    if content.steps:
-        pdf.steps_table(content.steps)
-    else:
-        pdf.paragraph(content.missing)
+    def steps() -> None:
+        if content.steps:
+            pdf.steps_table(content.steps)
+        else:
+            pdf.paragraph(content.missing)
 
-    sections.start("제출 서류")
-    if content.documents:
-        pdf.items(content.documents, mark="□")
-        if content.documents_raw:
-            pdf.paragraph("서류별 조건과 발급 기준은 맨 뒤 부록(공고 원문)에서 확인해 주세요.", muted=True)
-    elif content.documents_raw:
-        pdf.paragraph(content.documents_raw)
-    else:
-        pdf.paragraph(content.missing)
+    def documents() -> None:
+        if content.documents:
+            pdf.items(content.documents, mark="□")
+            if content.documents_raw:
+                pdf.paragraph("서류별 조건과 발급 기준은 맨 뒤 부록(공고 원문)에서 확인해 주세요.", muted=True)
+        elif content.documents_raw:
+            pdf.paragraph(content.documents_raw)
+        else:
+            pdf.paragraph(content.missing)
 
-    sections.start("확인할 조건")
-    pdf.paragraph("공고에 적힌 조건입니다. 해당하는지 직접 확인해 주세요.", muted=True)
-    if content.conditions:
-        pdf.items(content.conditions, mark="□")
-    else:
-        pdf.paragraph(content.missing)
+    def conditions() -> None:
+        pdf.paragraph("공고에 적힌 조건입니다. 해당하는지 직접 확인해 주세요.", muted=True)
+        if content.conditions:
+            pdf.items(content.conditions, mark="□")
+        else:
+            pdf.paragraph(content.missing)
 
-    # 주의사항·용어는 없으면 절을 빼고 번호를 당김
-    if content.cautions:
-        sections.start("주의사항")
-        pdf.items(content.cautions, mark="•")
+    def situation() -> None:
+        pdf.paragraph(_profile_line(content.profile) or "프로필 정보가 없어요.")
+        if content.observed:
+            pdf.subheading("대화에서 말씀하신 내용")
+            pdf.key_value_table(content.observed)
+        else:
+            pdf.paragraph("대화에서 따로 말씀하신 내용이 없어 프로필만 적었어요.", muted=True)
 
-    sections.start("내 상황")
-    pdf.paragraph(_profile_line(content.profile) or "프로필 정보가 없어요.")
-    if content.observed:
-        pdf.subheading("대화에서 말씀하신 내용")
-        pdf.key_value_table(content.observed)
-    else:
-        pdf.paragraph("대화에서 따로 말씀하신 내용이 없어 프로필만 적었어요.", muted=True)
-
-    if content.terms:
-        sections.start("용어 설명")
+    def terms() -> None:
         pdf.paragraph("공고에 나온 용어의 일반적인 뜻입니다. 이 정책에서의 기준은 공고를 따릅니다.", muted=True)
         pdf.key_value_table(content.terms)
+
+    sections.add("신청 방법", steps)
+    sections.add("제출 서류", documents)
+    sections.add("확인할 조건", conditions)
+    # 주의사항·용어는 없으면 절을 빼고 번호를 당김
+    if content.cautions:
+        sections.add("주의사항", lambda: pdf.items(content.cautions, mark="•"))
+    sections.add("내 상황", situation)
+    if content.terms:
+        sections.add("용어 설명", terms)
 
     pdf.ln(4)
     pdf.notice(content)
@@ -156,9 +164,21 @@ class _Sections:
         self._pdf = pdf
         self._number = 0
 
-    def start(self, title: str) -> None:
+    def add(self, title: str, draw: Callable[[], None]) -> None:
         self._number += 1
-        self._pdf.heading(f"{self._number}. {title}")
+        pdf = self._pdf
+        heading = f"{self._number}. {title}"
+        # 먼저 그려 보고 되돌려 높이를 잼 (fpdf2 offset_rendering)
+        start_page, start_y = pdf.page, pdf.y
+        with pdf.offset_rendering():
+            pdf.heading(heading)
+            draw()
+            height = pdf.y - start_y + (pdf.page - start_page) * pdf.eph
+            fits = pdf.page == start_page
+        if not fits and height <= pdf.eph * KEEP_SECTION_RATIO:
+            pdf.add_page()
+        pdf.heading(heading)
+        draw()
 
 
 class _GuidePdf(FPDF):
@@ -186,7 +206,7 @@ class _GuidePdf(FPDF):
         # 제목만 쪽 끝에 남고 내용이 다음 쪽으로 넘어가지 않게, 내용 몇 줄이 들어갈 자리가 없으면 쪽을 넘김
         if self.get_y() + HEADING_KEEP_HEIGHT > self.page_break_trigger:
             self.add_page()
-        else:
+        elif self.get_y() > self.t_margin:
             self.ln(5)
         self.set_font(FONT_FAMILY, "B", 13)
         self.write_line(text, height=8)
@@ -211,6 +231,11 @@ class _GuidePdf(FPDF):
     def items(self, values: list[str], mark: str) -> None:
         indent = 5
         for value in values:
+            # 두 줄 넘는 항목이 쪽 사이에서 갈리지 않게 항목 높이가 안 들어가면 쪽을 넘김
+            lines = self.multi_cell(self.epw - indent, LINE_HEIGHT, _clean(value), dry_run=True,
+                                    output=MethodReturnValue.LINES)
+            if self.will_page_break(len(lines) * LINE_HEIGHT):
+                self.add_page()
             self.cell(indent, LINE_HEIGHT, mark)
             self.multi_cell(0, LINE_HEIGHT, _clean(value), align="L", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.ln(1)

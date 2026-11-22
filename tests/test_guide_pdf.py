@@ -1,8 +1,10 @@
 import re
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import date, datetime
 
 import pytest
+from fpdf import FPDF
 
 from app.services import guide_pdf
 from app.services.guide_pdf import GuideContent, render_guide_pdf
@@ -29,17 +31,31 @@ CONTENT = GuideContent(
 
 
 # PDF에 찍히는 글자는 모두 _clean을 거쳐, 감싸서 그려진 글자를 순서대로 모음
+# 절 높이를 재려고 그려 보고 되돌리는 동안(offset_rendering)은 실제로 찍히지 않아 빼고 모음
 @pytest.fixture
 def drawn(monkeypatch) -> list[str]:
     texts: list[str] = []
-    original = guide_pdf._clean
+    measuring = [False]
+    original_clean = guide_pdf._clean
+    original_offset = FPDF.offset_rendering
 
     def record(text: str) -> str:
-        cleaned = original(text)
-        texts.append(cleaned)
+        cleaned = original_clean(text)
+        if not measuring[0]:
+            texts.append(cleaned)
         return cleaned
 
+    @contextmanager
+    def offset_rendering(self):
+        measuring[0] = True
+        try:
+            with original_offset(self) as recorder:
+                yield recorder
+        finally:
+            measuring[0] = False
+
     monkeypatch.setattr(guide_pdf, "_clean", record)
+    monkeypatch.setattr(FPDF, "offset_rendering", offset_rendering)
     return texts
 
 
@@ -114,6 +130,47 @@ def test_render_wrapped_url_links_full_address():
     # 요약 표 칸 2줄 + 안내 상자 줄들, 모두 잘리지 않은 주소
     assert len(links) >= 3
     assert set(links) == {url.encode()}
+
+
+def _pdf_at(y: float) -> guide_pdf._GuidePdf:
+    pdf = guide_pdf._GuidePdf()
+    pdf.add_page()
+    pdf.set_font(guide_pdf.FONT_FAMILY, "", 10)
+    pdf.set_y(y)
+    return pdf
+
+
+def _section_start_page(pdf: guide_pdf._GuidePdf, item_count: int) -> int:
+    pages: list[int] = []
+
+    def draw() -> None:
+        pages.append(pdf.page)
+        pdf.items([f"서류 {n}" for n in range(item_count)], mark="□")
+
+    guide_pdf._Sections(pdf).add("확인할 조건", draw)
+    # 처음은 높이를 재려고 그려 본 것, 마지막이 실제
+    return pages[-1]
+
+
+# 쪽 끝에서 잘릴 짧은 절은 통째로 다음 쪽, 쪽 절반보다 긴 절은 넘겨도 잘려 이어서 씀
+def test_short_section_moves_to_next_page_long_section_continues():
+    assert _section_start_page(_pdf_at(220), item_count=10) == 2
+    assert _section_start_page(_pdf_at(220), item_count=40) == 1
+    assert _section_start_page(_pdf_at(60), item_count=10) == 1
+
+
+# 여러 줄짜리 항목 하나가 쪽 사이에서 갈리지 않음
+def test_item_not_split_across_pages():
+    pdf = _pdf_at(0)
+    pdf.set_y(pdf.page_break_trigger - guide_pdf.LINE_HEIGHT * 2)
+    text = "긴 조건 설명 " * 40
+    lines = pdf.multi_cell(pdf.epw - 5, guide_pdf.LINE_HEIGHT, text, dry_run=True, output="LINES")
+    pdf.items([text], mark="□")
+
+    # 항목 전체가 둘째 쪽 맨 위부터
+    assert len(lines) >= 3
+    assert pdf.page == 2
+    assert pdf.get_y() == pytest.approx(pdf.t_margin + guide_pdf.LINE_HEIGHT * len(lines) + 1)
 
 
 def test_url_only_for_whole_value():
