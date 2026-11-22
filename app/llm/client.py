@@ -1,5 +1,6 @@
-from collections.abc import AsyncGenerator
-from dataclasses import dataclass
+import json
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 from openai import AsyncOpenAI, OpenAIError
@@ -40,6 +41,30 @@ class ParsedResult[T: BaseModel]:
 class BinaryEmbeddingError(OpenAIError):
     def __init__(self) -> None:
         super().__init__("임베딩 API가 이진(0/1) 벡터를 돌려줌 (encoding_format=float 확인)")
+
+
+# 도구 루프가 도구를 실행하기 직전에 내보냄. 받는 쪽이 진행 문구(SSE progress)를 만듦
+@dataclass(frozen=True)
+class ToolCall:
+    name: str
+    arguments: dict[str, Any]
+
+
+# 도구 루프의 마지막 이벤트. 토큰은 모든 왕복의 합
+@dataclass(frozen=True)
+class ToolLoopResult[T: BaseModel]:
+    parsed: T | None
+    prompt_tokens: int
+    completion_tokens: int
+    rounds: int
+    calls: list[ToolCall] = field(default_factory=list)
+
+
+# 도구 이름과 인자(dict)를 받아 모델에 돌려줄 글을 만듦
+ToolExecutor = Callable[[str, dict[str, Any]], Awaitable[str]]
+
+# 상한을 넘겨 실행하지 않은 호출에도 결과를 붙여야 다음 요청이 받아들여짐
+TOOL_LIMIT_OUTPUT = "도구 호출 상한에 도달해 실행하지 않음. 지금까지의 결과로 답할 것"
 
 
 class LLMClient:
@@ -171,5 +196,66 @@ class LLMClient:
             completion_tokens=usage.output_tokens if usage else 0,
         )
 
+    # 도구 호출이 오면 실행해 결과를 붙이고 다시 부름. 도구 없이 답하면 그 구조화 출력이 결과
+    # 상한에 닿으면 마지막 요청은 도구를 끄고(tool_choice=none) 답을 받아 왕복이 끝없이 늘지 않게 함
+    # 재시도하면 시간 제한을 몇 번 기다릴 수 있어 한 번만 부름. 전체 시간 제한은 부르는 쪽이 검
+    async def run_tools[T: BaseModel](
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        execute: ToolExecutor,
+        text_format: type[T],
+        *,
+        max_calls: int,
+        timeout: float,
+    ) -> AsyncGenerator[ToolCall | ToolLoopResult[T], None]:
+        client = self._client.with_options(timeout=timeout, max_retries=0)
+        items: list[Any] = list(messages)
+        calls: list[ToolCall] = []
+        prompt_tokens = completion_tokens = rounds = 0
+        while True:
+            closing = len(calls) >= max_calls
+            response = await client.responses.parse(
+                model=self.chat_model,
+                input=items,
+                tools=tools,
+                tool_choice="none" if closing else "auto",
+                text_format=text_format,
+            )
+            rounds += 1
+            if response.usage:
+                prompt_tokens += response.usage.input_tokens
+                completion_tokens += response.usage.output_tokens
+            requested = [item for item in response.output if item.type == "function_call"]
+            if not requested or closing:
+                yield ToolLoopResult(response.output_parsed, prompt_tokens, completion_tokens, rounds, calls)
+                return
+
+            # 추론 항목도 함께 돌려줘야 모델이 이어서 생각함. 답 글(message)은 도구를 부르는 중이라 뺌
+            items += [_as_input(item) for item in response.output if item.type != "message"]
+            for request in requested:
+                if len(calls) >= max_calls:
+                    output = TOOL_LIMIT_OUTPUT
+                else:
+                    call = ToolCall(request.name, _arguments(request.arguments))
+                    calls.append(call)
+                    yield call
+                    output = await execute(call.name, call.arguments)
+                items.append({"type": "function_call_output", "call_id": request.call_id, "output": output})
+
     async def close(self) -> None:
         await self._client.close()
+
+
+# parse가 붙이는 해석 결과(parsed_arguments)는 요청 형식에 없는 필드라 뺌
+def _as_input(item: Any) -> dict[str, Any]:
+    return item.model_dump(exclude_none=True, exclude={"parsed_arguments"})
+
+
+# strict 스키마라 보통 JSON 객체지만, 깨진 인자는 빈 인자로 실행해 도구가 오류 글을 돌려주게 함
+def _arguments(raw: str) -> dict[str, Any]:
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}

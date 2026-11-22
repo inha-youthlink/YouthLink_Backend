@@ -2,20 +2,26 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
+from fastapi.responses import StreamingResponse
 
+from app.core.config import Settings, get_settings
 from app.core.dependencies import (
     ClientId,
     PipelineDeps,
     get_agent_repository,
     get_chat_repository,
     get_pipeline_deps,
+    get_rate_limits,
     get_session_locks,
+    limit_chat_requests,
     parse_session_id,
 )
+from app.core.rate_limit import RateLimits
 from app.core.session_lock import SessionLocks
+from app.core.sse import SSE_HEADERS, with_pings
 from app.repositories.agent_repository import AgentRepository
 from app.repositories.chat_repository import ChatRepository
-from app.schemas.agent import AgentState
+from app.schemas.agent import AgentMessageRequest, AgentState
 from app.schemas.public import ErrorResponse
 from app.services.agent_service import AgentService
 
@@ -65,3 +71,29 @@ async def get_agent(session_id: SessionId, client_id: ClientId, agent: Agent) ->
 )
 async def reset_agent(session_id: SessionId, client_id: ClientId, agent: Agent) -> None:
     await agent.reset(session_id, client_id)
+
+
+# LLM을 불러 채팅과 같은 요청 제한·하루 상한을 씀. 세션·입력 오류는 스트림 전에 JSON으로 (계약 4.8, 1.4)
+@router.post(
+    "/{session_id}/agent/messages",
+    response_class=StreamingResponse,
+    responses={
+        status.HTTP_200_OK: {"content": {"text/event-stream": {}}},
+        status.HTTP_409_CONFLICT: {"model": ErrorResponse},
+        status.HTTP_429_TOO_MANY_REQUESTS: {"model": ErrorResponse},
+        **_NOT_FOUND,
+    },
+    dependencies=[Depends(limit_chat_requests)],
+)
+async def send_agent_message(
+    session_id: SessionId,
+    request: AgentMessageRequest,
+    client_id: ClientId,
+    agent: Agent,
+    settings: Annotated[Settings, Depends(get_settings)],
+    limits: Annotated[RateLimits, Depends(get_rate_limits)],
+) -> StreamingResponse:
+    events = await agent.start_turn(session_id, client_id, request, limits)
+    return StreamingResponse(
+        with_pings(events, settings.sse_ping_interval), media_type="text/event-stream", headers=SSE_HEADERS
+    )

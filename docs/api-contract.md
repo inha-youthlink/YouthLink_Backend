@@ -13,7 +13,7 @@
 **추천 에이전트 패널 (새 기능, 4.8)**
 - [ ] 채팅방 우측 버튼으로 패널을 열면 `GET /api/sessions/{sessionId}/agent`. 처음이면 시작 상태(인사 + 분야 질문 + 프로필 기준 카드), 대화한 적이 있으면 이어서 보여 줌
 - [ ] 선택지 칩(`options`)을 누르면 **칩 글자를 그대로** `POST …/agent/messages`의 `content`로 보냄. "직접 입력" 칩은 서버가 주지 않으니 프론트가 항상 붙임
-- [ ] 응답은 SSE: `progress`(0회 이상, "찾는 중" 표시) → `cards`(카드가 바뀌었을 때만) → `message` → `done`. 보통 **4~8초**라 `progress` 문구로 기다림을 보여 줌
+- [ ] 응답은 SSE: `progress`(0회 이상, "찾는 중" 표시) → `cards`(카드가 바뀌었을 때만) → `message` → `done`. 보통 **3~6초**라 `progress` 문구로 기다림을 보여 줌
 - [ ] 우측 카드 목록은 `cards` 이벤트를 받을 때마다 **통째로 교체**. 카드는 **최대 5개**이고 카드마다 `reason`(추천 이유, 시작 카드는 `null`)이 있음
 - [ ] (선택) 카드 목록 소제목을 단계별로: 시작 카드(`reason`이 모두 `null`)는 "프로필에 맞춘 추천", 에이전트가 고른 카드(`reason` 있음)부터는 "대화로 좁힌 추천" + 카드마다 추천 이유. 계약 변경 없이 `reason` 유무로 구분
 - [ ] (선택) 카드 목록 아래 "이 분야 정책 더 보기" 링크: 기존 채팅방 안 정책 검색 `GET /api/policies?sessionId=…&category=…`를 엶 (4.4, 백엔드 변경 없음). 분야는 첫 질문에서 고른 칩 기준, 직접 입력으로 시작했으면 `category` 없이
@@ -287,7 +287,7 @@ interface AgentState {
 | `POST /api/sessions/{sessionId}/chat` | 채팅 (SSE, 5절) | 됨 |
 | `GET /api/sessions/{sessionId}/recommendations` | 추천 정책 | 됨 |
 | `GET /api/sessions/{sessionId}/agent` | 추천 에이전트 열기 (v1.4) | 됨 |
-| `POST /api/sessions/{sessionId}/agent/messages` | 추천 에이전트에 답하기 (SSE, 4.8) | (나중) |
+| `POST /api/sessions/{sessionId}/agent/messages` | 추천 에이전트에 답하기 (SSE, 4.8) | 됨 |
 | `DELETE /api/sessions/{sessionId}/agent` | 추천 에이전트 새로 시작 (v1.4) | 됨 |
 | `PUT /api/sessions/{sessionId}/current-policy` | 채팅에서 이야기할 정책 지정 (v1.4) | 됨 |
 | `POST /api/sessions/{sessionId}/summary` | 대화 요약 | 됨 |
@@ -436,7 +436,7 @@ interface AgentState {
 - 날짜·금액·링크·기관명은 공고 데이터에서 그대로 넣음. 공고에 없는 항목은 "공고에 나와 있지 않음"과 문의처
 - 세션 프로필의 1차 필터(채팅 추천과 같은 기준) 밖의 정책(검색·스크랩으로 연 다른 지역 정책 등)도 만들어 주되, 응답 `outsideProfile`이 `true`이고 PDF 첫 쪽 경고에 "프로필 조건으로 찾은 추천 정책이 아님"을 적음. 어느 조건이 안 맞는지는 알려 주지 않음 (자격 판정을 하지 않아서)
 
-### 4.8 추천 에이전트 (v1.4, 답하기 `POST`는 나중)
+### 4.8 추천 에이전트 (v1.4)
 채팅방 우측 패널. 에이전트가 먼저 묻고, 사용자가 답할 때마다 질문과 우측 카드가 바뀐다. 프로필은 그 채팅방의 프로필이고 다시 묻지 않는다. 채팅 대화와는 **따로** 저장되며 서로의 기록에 섞이지 않는다.
 
 **`GET /api/sessions/{sessionId}/agent`** → `200 AgentState`
@@ -473,7 +473,7 @@ interface AgentState {
 | `error` | `{ "code": "...", "message": "..." }` | 0~1회 | 생성 중 실패. 보낸 뒤 연결을 닫음 (`done` 없음). `code`는 `RAG_UPSTREAM_ERROR`, `RAG_TIMEOUT`, `INTERNAL_ERROR` |
 
 - 순서: `progress`들 → `cards`(있으면) → `message` → `done`, 또는 `progress` 사이에 `error`
-- 글자 단위로 흘려보내지 않음 (답변이 질문·선택지·카드가 묶인 하나의 결과라서). 보통 **4~8초**, 정책을 여러 번 찾으면 15초 안팎
+- 글자 단위로 흘려보내지 않음 (답변이 질문·선택지·카드가 묶인 하나의 결과라서). 보통 **3~6초**(첫 `progress`까지 1초 안팎), 정책을 여러 번 찾으면 10초 안팎. 30초를 넘으면 `error`(`RAG_TIMEOUT`)
 - **저장**: 답변이 다 만들어지면 사용자 메시지·에이전트 답변·카드를 **함께** 저장한 뒤 `cards`·`message`를 보냄. 그 전에 실패하면(`error`) 아무것도 저장하지 않음 → 같은 `content`로 다시 보내면 됨 (그래서 채팅의 `clientMessageId`가 없음)
   - 연결이 끊겨도 서버는 생성을 멈추고 저장하지 않음. 다만 저장 직후에 끊기면 저장된 채로 남을 수 있어, `done`을 못 받았으면 `GET …/agent`로 확인한 뒤 다시 보냄
   - 사용자 메시지는 응답에 오지 않음 (`GET`에는 있음)
@@ -622,7 +622,7 @@ data: {"messageId":"1234"}
 ## 8. 남은 일
 | 항목 | 상태 |
 |---|---|
-| 추천 에이전트 | 열기·새로 시작 구현됨, 답하기(`POST …/agent/messages`)는 구현 중 (3.5, 4.8) |
+| 추천 에이전트 | 열기·답하기·새로 시작 구현됨 (3.5, 4.8) |
 | 채팅에서 이야기할 정책 지정 | 구현됨 (4.9, v1.4) |
 | 신청 가이드 PDF | 구현됨 (4.7, v1.3). 배포 경로에서 PDF 열림 확인 필요 |
 | 복합 질문 답변 | 형식은 이 문서대로 (5.3), 답변 동작은 구현 중. 정책 비교는 구현됨 (5.3). 개수 지정은 하지 않기로 함 (v1.4) |

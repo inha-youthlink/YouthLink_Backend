@@ -23,6 +23,13 @@ CATEGORY_NAMES = {
 }
 _CATEGORY_BY_NAME = {name: category for category, names in CATEGORY_NAMES.items() for name in names}
 
+# 세부 분류도 옛 이름이 두 개 남아 있어 새 이름으로 맞춤 (11-22 확인, 나머지는 이름이 같음)
+OLD_MIDDLE_CATEGORY_NAMES = {"온라인교육": "온·오프라인교육", "문화활동": "문화활동 및 생활지원"}
+
+
+def middle_category_names(name: str) -> frozenset[str]:
+    return frozenset({name, *(old for old, new in OLD_MIDDLE_CATEGORY_NAMES.items() if new == name)})
+
 
 class ApplicationStatus(StrEnum):
     OPEN = "OPEN"

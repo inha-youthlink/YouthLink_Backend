@@ -1,7 +1,8 @@
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, StringConstraints
 
+from app.schemas.chat import QUESTION_MAX_CHARS
 from app.schemas.public import KstDateTime, PublicModel
 from app.schemas.session import PolicySummary
 
@@ -30,3 +31,9 @@ class AgentMessage(PublicModel):
 class AgentState(PublicModel):
     messages: list[AgentMessage]
     cards: list[AgentCard]
+
+
+# 다시 보내도 저장이 겹치지 않아(실패하면 아무것도 저장 안 함) 채팅의 clientMessageId가 없음 (계약 4.8)
+class AgentMessageRequest(PublicModel):
+    # 채팅과 같은 기준: 앞뒤 공백을 지운 뒤 1~1,000자. 칩을 누르면 칩 글자 그대로 옴
+    content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=QUESTION_MAX_CHARS)]

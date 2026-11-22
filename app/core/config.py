@@ -84,6 +84,10 @@ class Settings(BaseSettings):
     # 동기 응답이라 프록시(Vercel) 대기 시간 제한 안에 끝나야 함. 보통 5~10초 (11-14 실측 4~10초)
     guide_timeout: float = Field(default=45.0, gt=0)
 
+    # Recommendation agent (계약 4.8)
+    # 도구 루프 전체(보통 왕복 2~3번)의 시간 제한. 넘으면 그 턴은 저장하지 않고 실패로 끝냄
+    agent_timeout: float = Field(default=30.0, gt=0)
+
     @property
     def is_prod(self) -> bool:
         return self.app_env == "prod"
