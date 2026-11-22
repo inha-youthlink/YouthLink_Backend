@@ -1,4 +1,6 @@
+import re
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from functools import lru_cache
@@ -6,7 +8,7 @@ from pathlib import Path
 
 from fontTools.ttLib import TTFont
 from fpdf import FPDF
-from fpdf.enums import XPos, YPos
+from fpdf.enums import MethodReturnValue, XPos, YPos
 from fpdf.fonts import FontFace
 
 # 신청 가이드 PDF 조립. 내용은 guide_service가 정하고 여기서는 배치만 함 (LLM·DB 없음)
@@ -27,9 +29,15 @@ LINE_HEIGHT = 6
 # 제목(약 10mm) + 내용 3줄
 HEADING_KEEP_HEIGHT = 30
 NOTICE_KEEP_HEIGHT = 45
+# 이보다 짧은 절은 쪽 끝에서 잘릴 것 같으면 통째로 다음 쪽에서 시작 (조건·서류 체크리스트를 한 쪽에서 보게)
+# 긴 절은 넘겨도 어차피 잘려 빈 공간만 생기므로 이어서 씀
+KEEP_SECTION_RATIO = 0.5
 CELL_PADDING = (1.5, 2)
 # fpdf2 표는 한 행을 여러 페이지로 나누지 못해, 한 칸이 페이지를 넘지 않을 길이로 자름 (단계·용어 설명은 보통 100자 안쪽)
 CELL_MAX_CHARS = 400
+# 긴 URL이 두 줄로 넘어가면 뷰어의 자동 링크 인식이 첫 줄만 잡아 깨진 주소로 가서, 칸 전체에 원래 주소 링크를 걸고 글자를 줄임
+URL_FONT_SIZE = 8.5
+_URL = re.compile(r"https?://\S+")
 
 NOTICE_TEXT = (
     "이 가이드는 공고 데이터와 대화 내용을 바탕으로 자동으로 만든 참고 자료입니다. "
@@ -87,46 +95,50 @@ def render_guide_pdf(content: GuideContent) -> bytes:
 
     sections = _Sections(pdf)
 
-    sections.start("신청 방법")
-    if content.steps:
-        pdf.steps_table(content.steps)
-    else:
-        pdf.paragraph(content.missing)
+    def steps() -> None:
+        if content.steps:
+            pdf.steps_table(content.steps)
+        else:
+            pdf.paragraph(content.missing)
 
-    sections.start("제출 서류")
-    if content.documents:
-        pdf.items(content.documents, mark="□")
-        if content.documents_raw:
-            pdf.paragraph("서류별 조건과 발급 기준은 맨 뒤 부록(공고 원문)에서 확인해 주세요.", muted=True)
-    elif content.documents_raw:
-        pdf.paragraph(content.documents_raw)
-    else:
-        pdf.paragraph(content.missing)
+    def documents() -> None:
+        if content.documents:
+            pdf.items(content.documents, mark="□")
+            if content.documents_raw:
+                pdf.paragraph("서류별 조건과 발급 기준은 맨 뒤 부록(공고 원문)에서 확인해 주세요.", muted=True)
+        elif content.documents_raw:
+            pdf.paragraph(content.documents_raw)
+        else:
+            pdf.paragraph(content.missing)
 
-    sections.start("확인할 조건")
-    pdf.paragraph("공고에 적힌 조건입니다. 해당하는지 직접 확인해 주세요.", muted=True)
-    if content.conditions:
-        pdf.items(content.conditions, mark="□")
-    else:
-        pdf.paragraph(content.missing)
+    def conditions() -> None:
+        pdf.paragraph("공고에 적힌 조건입니다. 해당하는지 직접 확인해 주세요.", muted=True)
+        if content.conditions:
+            pdf.items(content.conditions, mark="□")
+        else:
+            pdf.paragraph(content.missing)
 
-    # 주의사항·용어는 없으면 절을 빼고 번호를 당김
-    if content.cautions:
-        sections.start("주의사항")
-        pdf.items(content.cautions, mark="•")
+    def situation() -> None:
+        pdf.paragraph(_profile_line(content.profile) or "프로필 정보가 없어요.")
+        if content.observed:
+            pdf.subheading("대화에서 말씀하신 내용")
+            pdf.key_value_table(content.observed)
+        else:
+            pdf.paragraph("대화에서 따로 말씀하신 내용이 없어 프로필만 적었어요.", muted=True)
 
-    sections.start("내 상황")
-    pdf.paragraph(_profile_line(content.profile) or "프로필 정보가 없어요.")
-    if content.observed:
-        pdf.subheading("대화에서 말씀하신 내용")
-        pdf.key_value_table(content.observed)
-    else:
-        pdf.paragraph("대화에서 따로 말씀하신 내용이 없어 프로필만 적었어요.", muted=True)
-
-    if content.terms:
-        sections.start("용어 설명")
+    def terms() -> None:
         pdf.paragraph("공고에 나온 용어의 일반적인 뜻입니다. 이 정책에서의 기준은 공고를 따릅니다.", muted=True)
         pdf.key_value_table(content.terms)
+
+    sections.add("신청 방법", steps)
+    sections.add("제출 서류", documents)
+    sections.add("확인할 조건", conditions)
+    # 주의사항·용어는 없으면 절을 빼고 번호를 당김
+    if content.cautions:
+        sections.add("주의사항", lambda: pdf.items(content.cautions, mark="•"))
+    sections.add("내 상황", situation)
+    if content.terms:
+        sections.add("용어 설명", terms)
 
     pdf.ln(4)
     pdf.notice(content)
@@ -152,9 +164,21 @@ class _Sections:
         self._pdf = pdf
         self._number = 0
 
-    def start(self, title: str) -> None:
+    def add(self, title: str, draw: Callable[[], None]) -> None:
         self._number += 1
-        self._pdf.heading(f"{self._number}. {title}")
+        pdf = self._pdf
+        heading = f"{self._number}. {title}"
+        # 먼저 그려 보고 되돌려 높이를 잼 (fpdf2 offset_rendering)
+        start_page, start_y = pdf.page, pdf.y
+        with pdf.offset_rendering():
+            pdf.heading(heading)
+            draw()
+            height = pdf.y - start_y + (pdf.page - start_page) * pdf.eph
+            fits = pdf.page == start_page
+        if not fits and height <= pdf.eph * KEEP_SECTION_RATIO:
+            pdf.add_page()
+        pdf.heading(heading)
+        draw()
 
 
 class _GuidePdf(FPDF):
@@ -182,7 +206,7 @@ class _GuidePdf(FPDF):
         # 제목만 쪽 끝에 남고 내용이 다음 쪽으로 넘어가지 않게, 내용 몇 줄이 들어갈 자리가 없으면 쪽을 넘김
         if self.get_y() + HEADING_KEEP_HEIGHT > self.page_break_trigger:
             self.add_page()
-        else:
+        elif self.get_y() > self.t_margin:
             self.ln(5)
         self.set_font(FONT_FAMILY, "B", 13)
         self.write_line(text, height=8)
@@ -207,6 +231,11 @@ class _GuidePdf(FPDF):
     def items(self, values: list[str], mark: str) -> None:
         indent = 5
         for value in values:
+            # 두 줄 넘는 항목이 쪽 사이에서 갈리지 않게 항목 높이가 안 들어가면 쪽을 넘김
+            lines = self.multi_cell(self.epw - indent, LINE_HEIGHT, _clean(value), dry_run=True,
+                                    output=MethodReturnValue.LINES)
+            if self.will_page_break(len(lines) * LINE_HEIGHT):
+                self.add_page()
             self.cell(indent, LINE_HEIGHT, mark)
             self.multi_cell(0, LINE_HEIGHT, _clean(value), align="L", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.ln(1)
@@ -256,8 +285,12 @@ class _GuidePdf(FPDF):
         documents = f"제출 서류 {len(content.documents)}개" if content.documents else "제출 서류 목록 공고에 없음"
         rows = [*content.overview, ("준비할 것", f"{steps} · {documents}")]
         self.set_draw_color(*SUMMARY_FILL)
+        # 항목 이름이 짧아 고정 비율(24%)은 왼쪽이 비고 오른쪽 URL이 더 접혀, 가장 긴 항목 이름에 맞춤
+        self.set_font(FONT_FAMILY, "B", 10)
+        label_width = max(self.get_string_width(_cell(label)) for label, _ in rows) + 2 * CELL_PADDING[1] + 2
+        self.set_font(FONT_FAMILY, "", 10)
         with self.table(
-            col_widths=(24, 76),
+            col_widths=(label_width, self.epw - label_width),
             first_row_as_headings=False,
             text_align="LEFT",
             line_height=LINE_HEIGHT,
@@ -266,10 +299,15 @@ class _GuidePdf(FPDF):
             cell_fill_mode="ALL",
         ) as table:
             label_style = FontFace(emphasis="BOLD")
+            url_style = FontFace(color=ACCENT_COLOR, size_pt=URL_FONT_SIZE)
             for label, value in rows:
                 row = table.row()
                 row.cell(_cell(label), style=label_style)
-                row.cell(_cell(value))
+                url = _url(value)
+                if url:
+                    row.cell(_cell(value), style=url_style, link=url)
+                else:
+                    row.cell(_cell(value))
         if content.alerts:
             self.ln(1)
             self.set_text_color(*ALERT_COLOR)
@@ -287,14 +325,14 @@ class _GuidePdf(FPDF):
         self.set_font(FONT_FAMILY, "B", 10)
         self.write_line("꼭 확인해 주세요", fill=True)
         self.set_font(FONT_FAMILY, "", 9.5)
-        lines = [NOTICE_TEXT]
-        if content.source_url:
-            lines.append(f"공고 확인: {content.source_url}")
+        self.write_line(NOTICE_TEXT, fill=True)
+        url = _url(content.source_url or "")
+        if url:
+            self.multi_cell(0, LINE_HEIGHT, _clean(f"공고 확인: {url}"), fill=True, align="L", link=url,
+                            new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         if content.synced_on:
-            lines.append(f"정책 정보 기준일: {content.synced_on.isoformat()}")
-        lines.append(f"만든 시각: {content.generated_at.strftime('%Y-%m-%d %H:%M')}")
-        for line in lines:
-            self.write_line(line, fill=True)
+            self.write_line(f"정책 정보 기준일: {content.synced_on.isoformat()}", fill=True)
+        self.write_line(f"만든 시각: {content.generated_at.strftime('%Y-%m-%d %H:%M')}", fill=True)
 
 
 @lru_cache
@@ -311,6 +349,12 @@ def _markdown_safe(text: str) -> str:
         while marker in text:
             text = text.replace(marker, marker[0])
     return text
+
+
+# 값 전체가 URL일 때만 (설명 글 속 URL은 칸 전체를 링크로 만들면 안 됨)
+def _url(text: str) -> str | None:
+    value = text.strip()
+    return value if _URL.fullmatch(value) else None
 
 
 def _cell(text: str) -> str:
