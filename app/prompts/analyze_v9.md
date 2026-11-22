@@ -51,6 +51,8 @@
 - true: 사용자가 전국 정책을 빼고 자기 지역 정책만 보고 싶다고 말한 경우. ("인천만", "인천 거만 알려줘", "우리 지역 것만", "전국 말고 지역 정책만", "구에서 하는 것만")
 - true: 분야 없이 그 지역에서 하는 정책 자체를 묻는 경우도 지역 정책만 원하는 것으로 본다. ("인천 청년 정책 뭐 있어?", "부평구에서 하는 거 뭐 있어?")
 - false: 분야와 함께 지역 이름을 말하거나 지역을 자기 상황으로 말한 경우. ("인천 월세 지원 알려줘", "인천 사는데 받을 수 있어?") 전국 정책도 받을 수 있어 빼지 않는다. 지역을 말하지 않은 경우도 false
+- "받을 수 있는", "신청할 수 있는", "해당되는"처럼 자기가 받을 수 있는 정책을 묻는 질문은 지역 이름이 있어도 false. 전국 정책도 받을 수 있다. ("인천에서 받을 수 있는 청년 지원 알려줘")
+- 이번 [질문]에서 직접 말한 경우만 true. [최근 대화]에서 지역 정책만 찾았어도 이번 질문에서 다시 말하지 않으면 false. ("인천 청년 정책 뭐 있어?" 다음의 "주거 쪽은?"은 false)
 - 정책 목록을 원하는 질문(policy_list)에서만 true로 쓴다. 정해진 정책의 내용·자격·비교를 묻는 질문은 false
 - "인천만", "인천 거만 보여줘"처럼 짧게 이어서 말하면 [최근 대화]에서 찾던 주제를 이어 독립 질문과 검색어를 만들고 intent는 policy_list로 쓴다. 정책 상세를 보던 중이어도 그 정책의 분야로 목록을 찾는다. region에는 말한 지역 이름을 그대로 쓴다.
 
@@ -328,6 +330,9 @@ C1. 청년 구직 활동비
 [질문] 인천 청년 정책 뭐 있어?
 {"sub_queries": [{"standalone_question": "인천 지역의 청년 정책은 무엇이 있나요?", "search_query": "청년 지원 일자리 주거 생활", "target_refs": [], "compare_queries": [], "intent": "policy_list", "status_filter": "none", "region": "인천", "local_only": true, "age": null, "job_status": "없음", "school": "없음", "category": "없음"}], "is_new_topic": true}
 
+[질문] 인천에서 받을 수 있는 청년 지원 알려줘
+{"sub_queries": [{"standalone_question": "인천에서 받을 수 있는 청년 지원 정책은 무엇인가요?", "search_query": "청년 지원 일자리 주거 생활", "target_refs": [], "compare_queries": [], "intent": "policy_list", "status_filter": "none", "region": "인천", "local_only": false, "age": null, "job_status": "없음", "school": "없음", "category": "없음"}], "is_new_topic": true}
+
 [질문] 인천 월세 지원도 있어?
 {"sub_queries": [{"standalone_question": "인천의 청년 월세 지원 정책은 무엇인가요?", "search_query": "청년 월세 지원", "target_refs": [], "compare_queries": [], "intent": "policy_list", "status_filter": "none", "region": "인천", "local_only": false, "age": null, "job_status": "없음", "school": "없음", "category": "주거"}], "is_new_topic": false}
 
@@ -345,3 +350,20 @@ C1. 청년 구직 활동비
 
 [질문] 인천 거만 보여줘
 {"sub_queries": [{"standalone_question": "인천 지역의 청년 구직 지원 정책만 알려주세요.", "search_query": "청년 구직 활동 지원", "target_refs": [], "compare_queries": [], "intent": "policy_list", "status_filter": "none", "region": "인천", "local_only": true, "age": null, "job_status": "없음", "school": "없음", "category": "일자리"}], "is_new_topic": false}
+
+## 예시 11: 지역 정책만 찾은 다음 턴
+입력
+[최근 대화]
+<턴 1>
+질문: 인천 청년 정책 뭐 있어?
+답변: 인천 지역 청년 정책을 소개해 드릴게요. 1. 인천 청년 자격증 응시료 지원은…
+보여준 정책: 인천 청년 자격증 응시료 지원, 인천 청년 월세 지원, 인천 청년 인턴
+[직전에 보여준 정책]
+1. 인천 청년 자격증 응시료 지원
+2. 인천 청년 월세 지원
+3. 인천 청년 인턴
+[현재 대화 중인 정책]
+없음
+
+[질문] 주거 쪽은?
+{"sub_queries": [{"standalone_question": "청년 주거 지원 정책은 무엇인가요?", "search_query": "청년 주거 지원 월세 전세 임대주택", "target_refs": [], "compare_queries": [], "intent": "policy_list", "status_filter": "none", "region": "", "local_only": false, "age": null, "job_status": "없음", "school": "없음", "category": "주거"}], "is_new_topic": false}
