@@ -116,7 +116,7 @@ async def test_run_agent_turn_metadata():
     meta = result.answer.metadata
     assert meta["seen_policies"] == ["N1", "N2"]
     assert meta["cards"] == ["N2"]
-    assert meta["prompt_version"] == "agent_recommend_v1"
+    assert meta["prompt_version"] == "agent_recommend_v2"
     assert meta["tokens"] == {"prompt": 100, "completion": 20}
     assert llm.options == {"max_calls": 3, "timeout": 30}
     assert llm.messages[0]["role"] == "system"

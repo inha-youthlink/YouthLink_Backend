@@ -166,9 +166,14 @@ class AgentTools:
         counts = await repository.count_middle_categories(category_nos, list(large)) if large else {}
         merged = _merge_counts(counts)
         subs = _sub_categories(arguments.get("sub_categories"))
-        # 선택지 글자("주택·거주지")를 세부 분류로 넘기면 0개가 되어 그 분야의 세부 분류가 아니면 빼고 알림
-        unknown = [sub for sub in subs if merged and sub not in dict(merged)]
-        subs = [sub for sub in subs if sub not in unknown]
+        # 모델이 선택지 글자("주택·거주지", "미래역량 강화")를 넘기는 일이 잦아 띄어쓰기·"·"·"및"을 빼고 맞춤
+        # 그래도 그 분야의 세부 분류가 아니면 0개가 되므로 빼고 알림
+        unknown: list[str] = []
+        if merged:
+            known = {_sub_key(name): name for name, _ in merged}
+            resolved = [known.get(_sub_key(sub)) for sub in subs]
+            unknown = [sub for sub, name in zip(subs, resolved, strict=True) if name is None]
+            subs = list(dict.fromkeys(name for name in resolved if name))
         policy_nos = category_nos
         if subs and category_nos:
             names = tuple(sorted(set().union(*(middle_category_names(sub) for sub in subs))))
@@ -275,6 +280,10 @@ def _sub_categories(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [OLD_MIDDLE_CATEGORY_NAMES.get(name, name) for name in (str(v).strip() for v in value) if name]
+
+
+def _sub_key(name: str) -> str:
+    return "".join(name.replace("·", "").replace("및", "").split())
 
 
 # 옛 이름은 새 이름에 더해 많은 순으로

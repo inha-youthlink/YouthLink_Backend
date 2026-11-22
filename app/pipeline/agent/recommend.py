@@ -18,7 +18,7 @@ from app.schemas.session import PolicySummary
 
 # 추천 패널 한 턴 (계약 4.8): 지시문·입력 조립 → 도구 루프 → 출력 검증. DB에는 쓰지 않음 (저장은 서비스)
 
-PROMPT_VERSION = "agent_recommend_v1"
+PROMPT_VERSION = "agent_recommend_v2"
 # 첫 질문은 분야로 고정 (구상 문서 결정). 칩 글자 그대로 사용자 답으로 돌아옴
 START_QUESTION = "어떤 도움이 필요하세요?"
 START_OPTIONS = list(AGENT_CATEGORIES)
