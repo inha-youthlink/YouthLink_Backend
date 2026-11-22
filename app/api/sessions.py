@@ -21,6 +21,7 @@ from app.core.session_lock import SessionLocks
 from app.core.sse import SSE_HEADERS, with_pings
 from app.repositories.chat_repository import ChatRepository
 from app.schemas.guide import GuideRequest, GuideResult
+from app.schemas.policy import CurrentPolicyRequest
 from app.schemas.public import ErrorResponse
 from app.schemas.session import (
     ChatRequest,
@@ -32,7 +33,6 @@ from app.schemas.session import (
 )
 from app.services.assist_service import AssistService
 from app.services.chat_service import ChatService
-from app.services.chat_skeleton import skeleton_events
 from app.services.guide_service import GuideService
 from app.services.guide_store import GuideStore
 
@@ -99,6 +99,14 @@ async def get_session(session_id: SessionId, client_id: ClientId, service: Servi
 @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT, responses=_NOT_FOUND)
 async def delete_session(session_id: SessionId, client_id: ClientId, service: Service) -> None:
     await service.delete_session(session_id, client_id)
+
+
+# 계약 4.9: 정책 상세의 "채팅에서 물어보기". 메시지를 만들지 않고 LLM도 쓰지 않음
+@router.put("/{session_id}/current-policy", status_code=status.HTTP_204_NO_CONTENT, responses=_NOT_FOUND)
+async def set_current_policy(
+    session_id: SessionId, request: CurrentPolicyRequest, client_id: ClientId, service: Service
+) -> None:
+    await service.set_current_policy(session_id, client_id, request.policy_id)
 
 
 @router.get("/{session_id}/messages", responses=_NOT_FOUND)
@@ -174,12 +182,7 @@ async def chat(
     settings: Annotated[Settings, Depends(get_settings)],
     limits: Annotated[RateLimits, Depends(get_rate_limits)],
 ) -> StreamingResponse:
-    if settings.chat_skeleton_enabled:
-        # 배포 경로 SSE 확인용. LLM을 부르지 않고 저장하지 않아 하루 상한에 세지 않음
-        await service.get_session(session_id, client_id)
-        events = skeleton_events(request.client_message_id, settings)
-    else:
-        events = await service.start_chat(session_id, client_id, request, limits)
+    events = await service.start_chat(session_id, client_id, request, limits)
     return StreamingResponse(
         with_pings(events, settings.sse_ping_interval), media_type="text/event-stream", headers=SSE_HEADERS
     )
