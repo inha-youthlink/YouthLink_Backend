@@ -161,6 +161,8 @@ class AgentTools:
             base,
             exclude_closed=base.exclude_closed or not arguments.get("include_closed", False),
             large_categories=large,
+            # 검색 뒤에 빼면 후보 10개가 줄어 필터에서 뺌 (채팅 "인천만"과 같은 기준)
+            exclude_nationwide=bool(arguments.get("local_only")) and self._conditions.region is not None,
         )
         category_nos = await repository.filter_policy_nos(base, self._today)
         counts = await repository.count_middle_categories(category_nos, list(large)) if large else {}
@@ -193,7 +195,7 @@ class AgentTools:
         groups = group_by_policy(chunks)
         briefs = await repository.get_briefs([group.policy_no for group in groups])
         regions = await repository.get_region_labels(list(briefs))
-        picked = _pick(groups, briefs, regions, bool(arguments.get("local_only")))
+        picked = _pick(groups, briefs)
         record.policy_nos = [brief.record.policy_no for brief in picked]
 
         header[0] += f" 중 관련도 순 {len(picked)}개 (이름이 같은 정책은 하나만)"
@@ -296,7 +298,7 @@ def _merge_counts(counts: dict[str, int]) -> list[tuple[str, int]]:
 
 
 # 기관·지역별로 같은 이름의 공고가 따로 있어(예: "항공분야 취업지원" 3개) 점수 높은 하나만 남김
-def _pick(groups, briefs: dict[str, PolicyBriefRecord], regions: dict[str, str], local_only: bool):
+def _pick(groups, briefs: dict[str, PolicyBriefRecord]):
     picked: list[PolicyBriefRecord] = []
     names: set[str] = set()
     for group in groups:
@@ -304,7 +306,7 @@ def _pick(groups, briefs: dict[str, PolicyBriefRecord], regions: dict[str, str],
         if brief is None:
             continue
         name = "".join(brief.record.policy_name.split())
-        if name in names or (local_only and regions.get(group.policy_no) == "전국"):
+        if name in names:
             continue
         names.add(name)
         picked.append(brief)

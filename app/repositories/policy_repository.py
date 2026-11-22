@@ -142,6 +142,8 @@ class PolicyFilter:
     annual_income_won: int | None = None
     exclude_closed: bool = False
     exclude_upcoming: bool = False
+    # 지역 표시가 "전국"인 정책(전국 범위이거나 모든 시도를 덮음)을 뺌. 사용자가 자기 지역 정책만 원할 때
+    exclude_nationwide: bool = False
     # 정책 검색용. 대분류 이름 중 하나라도 있으면 남김 (옛 분류 이름도 함께 받음)
     large_categories: tuple[str, ...] = ()
     # 정책 검색용. 낱말마다 이름·설명·키워드 중 한 곳에 있어야 남김
@@ -406,6 +408,13 @@ def _filter_where(policy_filter: PolicyFilter, today: date) -> tuple[str, dict[s
     WHERE v.policy_no = p.policy_no AND v.sido_code = :sido_code
 )""")
         params["sido_code"] = policy_filter.sido_code
+
+    # 지역 표시(_region_label)의 "전국"과 같은 기준: 덮는 시도 수가 전체 시도 수와 같으면 전국
+    if policy_filter.exclude_nationwide:
+        clauses.append("""(
+    SELECT count(DISTINCT v.sido_code) FROM v_policy_region_resolved v
+    WHERE v.policy_no = p.policy_no AND v.is_active
+) < (SELECT count(DISTINCT sido_code) FROM region WHERE is_active)""")
 
     if policy_filter.age is not None:
         clauses.append("(p.min_age IS NULL OR p.min_age <= :age) AND (p.max_age IS NULL OR p.max_age >= :age)")
