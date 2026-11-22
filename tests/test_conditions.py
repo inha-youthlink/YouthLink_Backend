@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from app.pipeline.analyzer import AnalysisResult, FallbackReason, ResolvedSubQuery
@@ -211,3 +213,28 @@ def test_profile_conditions_used_when_analysis_failed():
 
     assert conditions.to_filter() == PROFILE_FILTER
     assert conditions.mismatches == []
+
+
+# "강남만"처럼 지역 정책만 원하면 전국 정책을 빼고, 답변이 알 수 있게 조건 줄에 남김
+def test_local_only_list_question_excludes_nationwide():
+    conditions = build_conditions(_analysis(_sub(region="강남", local_only=True)), PROFILE, REGIONS, CODE_NAMES)
+
+    assert conditions.to_filter() == replace(PROFILE_FILTER, exclude_nationwide=True)
+    assert "지역 범위: 서울특별시 전체와 서울특별시 강남구 정책만 (전국 정책 제외)" in conditions.lines
+    assert conditions.to_trace()["local_only"] is True
+
+
+# 상세·자격·비교는 정한 정책을 묻는 질문이라 거르지 않음. 프로필 지역이 없으면 거를 기준이 없음
+@pytest.mark.parametrize("intent", [Intent.POLICY_DETAIL, Intent.ELIGIBILITY, Intent.COMPARISON])
+def test_local_only_ignored_for_targeted_questions(intent):
+    sub = replace(_sub(local_only=True), intent=intent)
+
+    assert build_conditions(_analysis(sub), PROFILE, REGIONS, CODE_NAMES).to_filter() == PROFILE_FILTER
+
+
+def test_local_only_ignored_without_profile_region():
+    profile = PROFILE.model_copy(update={"region_code": None})
+    conditions = build_conditions(_analysis(_sub(local_only=True)), profile, REGIONS, CODE_NAMES)
+
+    assert conditions.to_filter().exclude_nationwide is False
+    assert not any(line.startswith("지역 범위") for line in conditions.lines)

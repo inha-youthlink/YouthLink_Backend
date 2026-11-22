@@ -107,6 +107,20 @@ async def test_sigungu_keeps_own_sido_wide_and_nationwide(repository):
     assert await _filter(repository, region_codes=("41113", "41117")) == NATIONWIDE | {"F-GWONSEON"}
 
 
+# 지역 표시 "전국"과 같은 기준: 모든 시도를 덮으면 코드가 일부여도 전국으로 보고 뺌
+async def test_exclude_nationwide_keeps_local_only(repository, session_factory):
+    async with session_factory() as session, session.begin():
+        await session.execute(text("INSERT INTO policy (policy_no, policy_name) VALUES ('F-ALLSIDO', 'F-ALLSIDO')"))
+        await session.execute(
+            text("INSERT INTO policy_region (policy_no, region_code) VALUES ('F-ALLSIDO', :code)"),
+            [{"code": code} for code in ("11110", "28237", "41113")],
+        )
+
+    assert await _filter(repository, region_codes=("28237",), exclude_nationwide=True) == {"F-INCHEON"}
+    assert await _filter(repository, sido_code="11", exclude_nationwide=True) == {"F-SEOUL", "F-JONGNO", "F-GANGNAM"}
+    assert (await repository.get_region_labels(["F-ALLSIDO"]))["F-ALLSIDO"] == "전국"
+
+
 async def test_age_excludes_only_out_of_range(repository):
     # 나이 정보가 없는 정책은 남김
     assert await _filter(repository, age=40) == ALL - {"F-GANGNAM"}

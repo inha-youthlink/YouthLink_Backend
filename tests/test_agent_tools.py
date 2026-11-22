@@ -135,10 +135,18 @@ async def test_search_sub_categories_loose_names():
     assert "빼고 찾음" not in output
 
 
-async def test_search_local_only_drops_nationwide():
-    tools, _, _ = _tools()
+# 검색 뒤에 빼면 후보가 줄어 필터에서 뺌. 프로필 지역이 없으면 거를 기준이 없어 걸지 않음
+async def test_search_local_only_excludes_nationwide_in_filter():
+    tools, policies, _ = _tools()
     await tools.execute("search_policies", _search(local_only=True))
-    assert tools.records[0].policy_nos == ["R1"]
+    await tools.execute("search_policies", _search())
+    assert [f.exclude_nationwide for f in policies.filters] == [True, False]
+
+    policies = FakePolicies()
+    deps = PipelineDeps(SimpleNamespace(top_k=30), None, FakeRetriever(), policies, None)
+    no_region = AgentTools(deps, replace(CONDITIONS, region=None), SeenPolicies(), TODAY)
+    await no_region.execute("search_policies", _search(local_only=True))
+    assert policies.filters[0].exclude_nationwide is False
 
 
 # 번호는 대화 전체에서 이어짐: 이전 턴에 본 정책은 같은 번호
