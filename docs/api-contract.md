@@ -28,7 +28,7 @@
 - [ ] **채팅방 안에서 연 정책 상세**에만 "채팅에서 물어보기" 보조 버튼 (신청 가이드 버튼이 주 버튼). 채팅방 밖 상세에는 두지 않음
 - [ ] 누르면 `PUT /api/sessions/{sessionId}/current-policy` → `204` 뒤 상세(와 에이전트 패널)를 닫고 채팅 입력창에 초점
 - [ ] 입력창 위에 "이야기 중: ○○" 표시, placeholder는 "○○에 대해 물어보세요". **글자를 자동으로 넣거나 보내지 않음**
-- [ ] 표시는 사용자가 첫 질문을 보내면 없앰 (그 뒤 현재 정책은 채팅 흐름대로 바뀜, 5.3)
+- [ ] 표시는 **누른 뒤** 사용자가 질문을 보내면 없앰 (그 뒤 현재 정책은 채팅 흐름대로 바뀜, 5.3). 누르기 전에 보낸 질문의 답변이 끝나도(`done`) 표시는 그대로 둠
 
 **삭제된 것 (과도기 호환·뼈대)**
 - [ ] v0.3 값이 이제 `400 VALIDATION_FAILED`: 프로필·정책 검색의 시도 enum `region`(`SEOUL` 등), 정책 검색 `category=FINANCE`. 카드의 v0.3 `region` 필드는 더 이상 오지 않음 (`regionLabel`만). 프론트 `origin/main`(11-15)에서 쓰지 않는 것을 확인함
@@ -289,7 +289,7 @@ interface AgentState {
 | `GET /api/sessions/{sessionId}/agent` | 추천 에이전트 열기 (v1.4) | (나중) |
 | `POST /api/sessions/{sessionId}/agent/messages` | 추천 에이전트에 답하기 (SSE, 4.8) | (나중) |
 | `DELETE /api/sessions/{sessionId}/agent` | 추천 에이전트 새로 시작 (v1.4) | (나중) |
-| `PUT /api/sessions/{sessionId}/current-policy` | 채팅에서 이야기할 정책 지정 (v1.4) | (나중) |
+| `PUT /api/sessions/{sessionId}/current-policy` | 채팅에서 이야기할 정책 지정 (v1.4) | 됨 |
 | `POST /api/sessions/{sessionId}/summary` | 대화 요약 | 됨 |
 | `POST /api/sessions/{sessionId}/guides` | 신청 가이드 PDF 만들기 | 됨 (v1.3) |
 | `GET /api/guides/{token}.pdf` | 만든 PDF 받기 (`pdfUrl`) | 됨 (v1.3) |
@@ -488,7 +488,7 @@ interface AgentState {
 - 추천 에이전트 대화와 카드를 모두 지움 (채팅 대화·현재 정책은 그대로). 대화가 없어도 `204`
 - 에이전트 답변을 만드는 중이면 `409 STREAM_IN_PROGRESS`
 
-### 4.9 채팅에서 이야기할 정책 지정 `PUT /api/sessions/{sessionId}/current-policy` → `204` (v1.4, 나중)
+### 4.9 채팅에서 이야기할 정책 지정 `PUT /api/sessions/{sessionId}/current-policy` → `204` (v1.4)
 ```json
 { "policyId": "20251031005400211234" }
 ```
@@ -496,7 +496,7 @@ interface AgentState {
 - 다음 채팅 질문부터 반영 (5.3 "현재 정책"). 채팅 기록에는 아무것도 남지 않음
 - 프로필 1차 필터 밖의 정책(검색·스크랩으로 연 다른 지역 정책 등)도 지정할 수 있음
 - 오류: `policyId` 형식 오류 `400 VALIDATION_FAILED`(가이드와 같은 기준), 없는 정책·비활성 정책 `404 POLICY_NOT_FOUND`, 없는 세션 `404 SESSION_NOT_FOUND`
-- 채팅 답변을 만드는 중에 불러도 됨. 진행 중인 답변에는 반영되지 않고, 그 답변이 현재 정책을 다시 바꿀 수 있음
+- 채팅 답변을 만드는 중에 불러도 됨 (카드가 답변보다 먼저 와 답변 중에도 상세를 열 수 있음). 진행 중인 답변에는 반영되지 않지만, 그 답변이 끝나도 지정한 정책이 남아 다음 질문의 기준이 됨. 그래서 그 답변의 `done`에서 "이야기 중" 표시를 지우지 않음
 
 ## 5. 채팅 스트리밍 `POST /api/sessions/{sessionId}/chat`
 
@@ -623,7 +623,7 @@ data: {"messageId":"1234"}
 | 항목 | 상태 |
 |---|---|
 | 추천 에이전트 | 형식은 이 문서대로 (3.5, 4.8), 구현 중 |
-| 채팅에서 이야기할 정책 지정 | 형식은 이 문서대로 (4.9), 구현 중 |
+| 채팅에서 이야기할 정책 지정 | 구현됨 (4.9, v1.4) |
 | 신청 가이드 PDF | 구현됨 (4.7, v1.3). 배포 경로에서 PDF 열림 확인 필요 |
 | 복합 질문 답변 | 형식은 이 문서대로 (5.3), 답변 동작은 구현 중. 정책 비교는 구현됨 (5.3). 개수 지정은 하지 않기로 함 (v1.4) |
 

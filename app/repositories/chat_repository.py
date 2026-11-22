@@ -141,6 +141,22 @@ INSERT INTO chat_current_policy (room_id, policy_no, display_order)
 VALUES (:room_id, :policy_no, :display_order)
 """)
 
+_LIST_CURRENT_POLICY_NOS_SQL = text("""
+SELECT policy_no
+FROM chat_current_policy
+WHERE room_id = :room_id
+ORDER BY display_order
+""")
+
+# 현재 정책을 바꾸는 두 경로(답변 저장, 정책 지정)가 방 단위로 차례를 지키게 함
+# NO KEY UPDATE라 질문 저장의 FK 확인(KEY SHARE)은 막지 않음
+_LOCK_ROOM_SQL = text("""
+SELECT 1
+FROM chat_room
+WHERE room_id = :room_id
+FOR NO KEY UPDATE
+""")
+
 # 제목은 첫 질문으로만 정하고, 이후에는 바뀌지 않아 목록에서 같은 채팅방을 찾기 쉬움
 # 주인 조건을 함께 걸어 확인과 삭제 사이에 다른 요청이 끼어들 틈을 없앰
 # 하위 채팅 테이블(프로필·메시지·정책 참조·현재 정책)은 FK ON DELETE CASCADE로 함께 지워짐
@@ -289,8 +305,11 @@ class ChatRepository:
         answer_metadata: dict[str, Any],
         policies: list[PolicyItem],
         current_policies: list[PolicyRef],
+        current_policies_at_start: list[str] | None = None,
     ) -> int:
         async with self._session_factory() as session, session.begin():
+            # 메시지 INSERT의 FK 잠금보다 먼저 잡아 정책 지정과 서로 기다리는 일이 없게 함
+            await session.execute(_LOCK_ROOM_SQL, {"room_id": room_id})
             result = await session.execute(_INSERT_MESSAGE_SQL, {
                 "room_id": room_id, "role": "assistant", "content": answer, "metadata": answer_metadata,
                 "client_message_id": None, "reply_to_message_id": question_id,
@@ -310,15 +329,34 @@ class ChatRepository:
                 ])
 
             # 현재 정책은 지금 상태만 두는 테이블이라 매 턴 지우고 다시 넣음 (이력은 답변 metadata)
-            await session.execute(_DELETE_CURRENT_POLICIES_SQL, {"room_id": room_id})
-            if current_policies:
-                await session.execute(_INSERT_CURRENT_POLICY_SQL, [
-                    {"room_id": room_id, "policy_no": policy.policy_no, "display_order": order}
-                    for order, policy in enumerate(current_policies, start=1)
-                ])
+            # 답변 중에 사용자가 정책을 지정했으면(시작 때와 다름) 사용자 선택이 다음 질문 기준이라 덮어쓰지 않음 (계약 4.9)
+            if current_policies_at_start is None or await _current_nos(session, room_id) == current_policies_at_start:
+                await _replace_current(session, room_id, [policy.policy_no for policy in current_policies])
             # 제목은 질문을 저장할 때 정해져 있어 시각만 바꿈
             await session.execute(_TOUCH_ROOM_SQL, {"room_id": room_id, "title": None})
         return answer_id
+
+    # 정책 상세의 "채팅에서 물어보기" (계약 4.9). 다음 질문의 분석이 이 정책을 현재 정책으로 봄
+    # 방이 없으면 False. 주인 확인 뒤 방이 지워져도 FK 오류(500) 대신 없는 세션으로 답하게 함
+    async def replace_current_policies(self, room_id: UUID, policy_nos: list[str]) -> bool:
+        async with self._session_factory() as session, session.begin():
+            if (await session.execute(_LOCK_ROOM_SQL, {"room_id": room_id})).first() is None:
+                return False
+            await _replace_current(session, room_id, policy_nos)
+        return True
+
+
+async def _current_nos(session: AsyncSession, room_id: UUID) -> list[str]:
+    return list((await session.execute(_LIST_CURRENT_POLICY_NOS_SQL, {"room_id": room_id})).scalars())
+
+
+async def _replace_current(session: AsyncSession, room_id: UUID, policy_nos: list[str]) -> None:
+    await session.execute(_DELETE_CURRENT_POLICIES_SQL, {"room_id": room_id})
+    if policy_nos:
+        await session.execute(_INSERT_CURRENT_POLICY_SQL, [
+            {"room_id": room_id, "policy_no": policy_no, "display_order": order}
+            for order, policy_no in enumerate(policy_nos, start=1)
+        ])
 
 
 def _room_record(row: Any) -> RoomRecord:
