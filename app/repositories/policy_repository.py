@@ -53,6 +53,20 @@ _SEARCH_ORDER_SQL = f"""{STATUS_ORDER_SQL},
 _AVAILABLE_FIRST_ORDER_SQL = f"""CASE status_group WHEN 2 THEN 1 WHEN 1 THEN 2 ELSE status_group END,
     {_SEARCH_ORDER_SQL}"""
 
+_GET_BRIEFS_SQL = text(f"""
+SELECT {RECORD_COLUMNS}, p.middle_categories, p.description, p.support_content
+FROM policy p
+WHERE p.policy_no = ANY(:policy_nos)
+""")
+
+# 정책마다 한 번만 셈 (세부 분류가 둘인 정책은 각각에 하나씩)
+_COUNT_MIDDLE_CATEGORIES_SQL = text("""
+SELECT t.middle, count(DISTINCT p.policy_no) AS policies
+FROM policy p, unnest(p.large_categories, p.middle_categories) AS t(large, middle)
+WHERE p.policy_no = ANY(:policy_nos) AND t.large = ANY(:large_categories) AND t.middle IS NOT NULL
+GROUP BY t.middle
+""")
+
 _GET_DETAIL_SQL = text(f"""
 SELECT {RECORD_COLUMNS},
        p.description, p.support_content, p.application_method, p.submission_documents,
@@ -132,6 +146,8 @@ class PolicyFilter:
     large_categories: tuple[str, ...] = ()
     # 정책 검색용. 낱말마다 이름·설명·키워드 중 한 곳에 있어야 남김
     keywords: tuple[str, ...] = ()
+    # 추천 에이전트용. 세부 분류 이름 중 하나라도 있으면 남김. 대분류가 있으면 그 대분류의 세부 분류만 봄
+    middle_categories: tuple[str, ...] = ()
 
     def is_empty(self) -> bool:
         return self == PolicyFilter()
@@ -166,6 +182,15 @@ class PolicyRecord:
             region_label=region_label,
             category=category_of(self.large_categories),
         )
+
+
+# 추천 에이전트 검색 결과 한 줄에 쓰는 정책 정보 (카드 정보 + 세부 분류·요약 원문)
+@dataclass(frozen=True)
+class PolicyBriefRecord:
+    record: PolicyRecord
+    middle_categories: list[str]
+    description: str | None
+    support_content: str | None
 
 
 # 정책 상세 (공개 API). 문장 조립은 서비스에서 함
@@ -213,6 +238,32 @@ class PolicyRepository:
         async with self._session_factory() as session:
             result = await session.execute(_GET_BY_IDS_SQL, {"policy_nos": policy_nos})
             return {row["policy_no"]: PolicyRecord(**row) for row in result.mappings()}
+
+    async def get_briefs(self, policy_nos: list[str]) -> dict[str, PolicyBriefRecord]:
+        if not policy_nos:
+            return {}
+        async with self._session_factory() as session:
+            result = await session.execute(_GET_BRIEFS_SQL, {"policy_nos": policy_nos})
+            briefs = {}
+            for row in result.mappings():
+                values = dict(row)
+                extra = {name: values.pop(name) for name in ("middle_categories", "description", "support_content")}
+                briefs[values["policy_no"]] = PolicyBriefRecord(
+                    record=PolicyRecord(**values),
+                    middle_categories=list(extra["middle_categories"] or []),
+                    description=extra["description"],
+                    support_content=extra["support_content"],
+                )
+            return briefs
+
+    # 세부 분류 이름 → 정책 수. 옛 이름도 그대로 돌려주므로 합치는 일은 부르는 쪽이 함
+    async def count_middle_categories(self, policy_nos: list[str], large_categories: list[str]) -> dict[str, int]:
+        if not policy_nos or not large_categories:
+            return {}
+        params = {"policy_nos": policy_nos, "large_categories": large_categories}
+        async with self._session_factory() as session:
+            result = await session.execute(_COUNT_MIDDLE_CATEGORIES_SQL, params)
+            return {row.middle: row.policies for row in result}
 
     # 벡터 검색이 놓치는 줄인 이름("도약계좌" → "청년 자산형성 지원(청년도약계좌)")을 찾으려고 공백을 빼고 포함 여부로 비교함
     async def find_nos_by_name(self, name: str, policy_nos: list[str] | None, limit: int) -> list[str]:
@@ -403,6 +454,15 @@ def _filter_where(policy_filter: PolicyFilter, today: date) -> tuple[str, dict[s
     if policy_filter.large_categories:
         clauses.append("p.large_categories && CAST(:large_categories AS TEXT[])")
         params["large_categories"] = list(policy_filter.large_categories)
+
+    # 대분류와 세부 분류 배열은 같은 자리끼리 짝이라("권익보호"가 일자리·참여권리 둘 다 있음) 짝으로 봄
+    if policy_filter.middle_categories:
+        large = "AND t.large = ANY(CAST(:large_categories AS TEXT[]))" if policy_filter.large_categories else ""
+        clauses.append(f"""EXISTS (
+    SELECT 1 FROM unnest(p.large_categories, p.middle_categories) AS t(large, middle)
+    WHERE t.middle = ANY(CAST(:middle_categories AS TEXT[])) {large}
+)""")
+        params["middle_categories"] = list(policy_filter.middle_categories)
 
     # 키워드 배열은 낱말 단위라 "월세"로 "청년월세"를 찾을 수 있게 이어 붙인 문자열에서 찾음
     for index, word in enumerate(policy_filter.keywords):

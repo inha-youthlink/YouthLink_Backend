@@ -1,10 +1,10 @@
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import text
 
-from app.repositories.policy_repository import PolicyRepository
+from app.repositories.policy_repository import PolicyFilter, PolicyRepository
 from tests.conftest import TEST_POLICY_NOS
 
 FIRST, SECOND, WITHOUT_CHUNKS = TEST_POLICY_NOS
@@ -168,3 +168,60 @@ async def test_find_nos_by_name_literal_and_too_short(name_repository):
     assert await name_repository.find_nos_by_name("0% 환급", None, 10) == ["N-PERCENT"]
     assert await name_repository.find_nos_by_name("%", None, 10) == []
     assert await name_repository.find_nos_by_name("청 ", None, 10) == []
+
+
+# 대분류·세부 분류 배열은 같은 자리끼리 짝 ("권익보호"가 일자리·참여권리 둘 다 있음)
+MIDDLE_POLICIES = [
+    ("M-JOB", "취업 지원", ["일자리"], ["취업"]),
+    ("M-RIGHTS-JOB", "노동 상담", ["일자리"], ["권익보호"]),
+    ("M-RIGHTS-PART", "청년 권리 교육", ["참여권리"], ["권익보호"]),
+    ("M-EDU-OLD", "온라인 강의", ["교육"], ["온라인교육"]),
+    ("M-EDU-NEW", "오프라인 강의", ["교육･직업훈련"], ["온·오프라인교육"]),
+    ("M-TWO", "역량 교육", ["교육･직업훈련", "교육･직업훈련"], ["온·오프라인교육", "미래역량강화"]),
+]
+
+
+@pytest.fixture
+async def middle_repository(session_factory):
+    async with session_factory() as session, session.begin():
+        await session.execute(
+            text("""INSERT INTO policy (policy_no, policy_name, large_categories, middle_categories, description,
+                    support_content) VALUES (:no, :name, :large, :middle, :description, '지원 내용')"""),
+            [
+                {"no": no, "name": name, "large": large, "middle": middle, "description": f"{name} 설명"}
+                for no, name, large, middle in MIDDLE_POLICIES
+            ],
+        )
+    yield PolicyRepository(session_factory)
+    async with session_factory() as session, session.begin():
+        await session.execute(
+            text("DELETE FROM policy WHERE policy_no = ANY(:nos)"), {"nos": [row[0] for row in MIDDLE_POLICIES]}
+        )
+
+
+async def test_middle_category_filter_pairs_with_large_category(middle_repository):
+    jobs = PolicyFilter(large_categories=("일자리",), middle_categories=("권익보호",))
+    assert await middle_repository.filter_policy_nos(jobs, date(2026, 11, 22)) == ["M-RIGHTS-JOB"]
+    anywhere = PolicyFilter(middle_categories=("권익보호",))
+    assert sorted(await middle_repository.filter_policy_nos(anywhere, date(2026, 11, 22))) == [
+        "M-RIGHTS-JOB", "M-RIGHTS-PART",
+    ]
+
+
+# 정책마다 한 번만 세고, 옛 이름은 그대로 돌려줌 (합치기는 도구가 함)
+async def test_count_middle_categories(middle_repository):
+    nos = [row[0] for row in MIDDLE_POLICIES]
+    counts = await middle_repository.count_middle_categories(nos, ["교육", "교육･직업훈련"])
+    assert counts == {"온라인교육": 1, "온·오프라인교육": 2, "미래역량강화": 1}
+    assert await middle_repository.count_middle_categories(nos, []) == {}
+    assert await middle_repository.count_middle_categories([], ["일자리"]) == {}
+
+
+async def test_get_briefs(middle_repository):
+    briefs = await middle_repository.get_briefs(["M-TWO", "NOPE"])
+    assert list(briefs) == ["M-TWO"]
+    brief = briefs["M-TWO"]
+    assert brief.record.policy_name == "역량 교육"
+    assert brief.middle_categories == ["온·오프라인교육", "미래역량강화"]
+    assert (brief.description, brief.support_content) == ("역량 교육 설명", "지원 내용")
+    assert await middle_repository.get_briefs([]) == {}
