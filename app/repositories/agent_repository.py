@@ -23,10 +23,12 @@ ORDER BY message_id
 """)
 
 # 최근 것부터 자른 뒤 다시 오래된 순으로 돌려줌
+# metadata는 trace까지 있어 다음 턴에 이어 쓰는 값(본 정책 번호, 카드 번호)만 꺼냄
 _LIST_RECENT_MESSAGES_SQL = text(f"""
-SELECT {_MESSAGE_COLUMNS}
+SELECT {_MESSAGE_COLUMNS}, carried
 FROM (
-    SELECT {_MESSAGE_COLUMNS}
+    SELECT {_MESSAGE_COLUMNS},
+           jsonb_build_object('seen_policies', metadata->'seen_policies', 'cards', metadata->'cards') AS carried
     FROM chat_agent_message
     WHERE room_id = :room_id
     ORDER BY message_id DESC
@@ -76,6 +78,8 @@ class AgentMessageRecord:
     question: str | None
     options: list[str]
     created_at: datetime
+    # list_recent_messages에서만 채움: 다음 턴에 이어 쓰는 metadata 일부 (본 정책 번호, 보여 준 카드)
+    carried: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

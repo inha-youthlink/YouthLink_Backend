@@ -90,6 +90,19 @@ async def test_recent_messages_keep_latest_in_order(agent_repository, chat_repos
     assert await agent_repository.list_recent_messages(room_id, 0) == []
 
 
+# 다음 턴에 이어 쓰는 값(본 정책, 카드)만 꺼내고 trace는 읽지 않음
+async def test_list_recent_messages_carries_seen_policies(agent_repository, chat_repository):
+    room_id = await chat_repository.create_room(USER_ID, Profile())
+    metadata = {"seen_policies": [P1, P2], "cards": [P2], "tool_calls": [{"name": "search_policies"}]}
+    await agent_repository.save_turn(room_id, "주거", AgentAnswer(content="답변", metadata=metadata), None)
+
+    user, answer = await agent_repository.list_recent_messages(room_id, 2)
+
+    assert user.carried == {"seen_policies": None, "cards": None}
+    assert answer.carried == {"seen_policies": [P1, P2], "cards": [P2]}
+    assert (await agent_repository.list_messages(room_id))[1].carried == {}
+
+
 # 새로 시작: 에이전트 대화만 지우고 채팅 대화·현재 정책·다른 방은 그대로
 async def test_delete_conversation_only_agent_rows(agent_repository, chat_repository, session_factory):
     room_id = await chat_repository.create_room(USER_ID, Profile())
