@@ -13,7 +13,7 @@ from app.schemas.pipeline import ConversationTurn, PipelineInput, PolicyRef
 
 logger = logging.getLogger(__name__)
 
-PROMPT_NAME = "analyze_v8"
+PROMPT_NAME = "analyze_v9"
 # 프롬프트 규칙("최대 3개")과 함께 바뀌어야 해서 설정값이 아닌 상수로 둠
 MAX_SUB_QUERIES = 3
 NONE_TEXT = "없음"
@@ -35,6 +35,7 @@ class ResolvedSubQuery:
     status_filter: StatusFilter
     search_query: str = ""
     region: str = ""
+    local_only: bool = False
     age: int | None = None
     job_status: JobStatus = JobStatus.NONE
     school: SchoolLevel = SchoolLevel.NONE
@@ -74,6 +75,7 @@ class AnalysisResult:
                     "intent": sub.intent.value,
                     "status_filter": sub.status_filter.value,
                     "region": sub.region,
+                    "local_only": sub.local_only,
                     "age": sub.age,
                     "job_status": sub.job_status.value,
                     "school": sub.school.value,
@@ -162,6 +164,7 @@ def _resolve(sub: SubQuery, labels: dict[str, PolicyRef]) -> ResolvedSubQuery:
         intent=sub.intent,
         status_filter=sub.status_filter,
         region=sub.region.strip(),
+        local_only=sub.local_only,
         # 나이를 잘못 읽은 값으로 정책을 빼지 않도록 사람 나이로 보기 어려운 값은 버림
         age=sub.age if sub.age is not None and 0 < sub.age < 100 else None,
         job_status=sub.job_status,

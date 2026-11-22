@@ -5,7 +5,7 @@ from typing import Any, TypeVar
 from app.pipeline.analyzer import AnalysisResult, ResolvedSubQuery
 from app.pipeline.context import PipelineContext
 from app.repositories.policy_repository import PolicyFilter, RegionRow
-from app.schemas.analysis import JobStatus, SchoolLevel, StatusFilter
+from app.schemas.analysis import Intent, JobStatus, SchoolLevel, StatusFilter
 from app.schemas.pipeline import Profile
 
 REGION = "지역"
@@ -99,6 +99,8 @@ class SearchConditions:
     marriage: Condition | None = None
     income: Condition | None = None
     open_only: bool = False
+    # 목록 질문에서 전국 정책을 빼고 프로필 지역 정책만. 프로필 지역이 없으면 거를 기준이 없어 무시
+    local_only: bool = False
     mismatches: list[Mismatch] = field(default_factory=list)
     # 질문에 지역이 있었지만 어느 지역인지 알 수 없어 프로필 지역으로 거른 경우
     unknown_region: str = ""
@@ -125,12 +127,14 @@ class SearchConditions:
             annual_income_won=int(self.income.code) if self.income else None,
             exclude_closed=self.open_only,
             exclude_upcoming=self.open_only,
+            exclude_nationwide=self.local_only and self.region is not None,
         )
 
     def to_trace(self) -> dict[str, Any]:
         return {
             "lines": self.lines,
             "unknown_region": self.unknown_region,
+            "local_only": self.local_only,
             "mismatches": [
                 {"name": m.name, "question": m.question, "profile": m.profile, "asks_back": m.asks_back}
                 for m in self.mismatches
@@ -305,6 +309,8 @@ def build_conditions(
             if profile.annual_income is not None else None
         ),
         open_only=any(sub.status_filter == StatusFilter.OPEN_ONLY for sub in subs),
+        # 상세·자격·비교는 이미 정한 정책을 묻는 질문이라 거르면 그 정책이 빠질 수 있어 목록 질문만
+        local_only=any(sub.local_only and sub.intent == Intent.POLICY_LIST for sub in subs),
     )
     mismatches = _mismatches(subs, conditions, regions)
     # 프로필 지역이 없으면 지역으로 거르지 않아 알릴 것이 없음
@@ -356,6 +362,11 @@ def _lines(conditions: SearchConditions) -> list[str]:
     lines = [f"{name}: {condition.label}" for name, condition in labeled if condition]
     if conditions.open_only:
         lines.append("신청 상태: 지금 신청 가능한 정책만")
+    if conditions.local_only and conditions.region is not None:
+        # 시군구 프로필도 그 시도 전체 정책은 남아, 시도와 시군구를 함께 적어 답변이 범위를 좁게 말하지 않게 함
+        region = conditions.region
+        scope = f"{region.sido_name} 전체와 {region.label}" if region.codes else region.label
+        lines.append(f"지역 범위: {scope} 정책만 (전국 정책 제외)")
     lines += [
         f"질문에서 말한 {mismatch.name}: {mismatch.question} (프로필과 달라 프로필 기준으로 찾음)"
         for mismatch in conditions.mismatches

@@ -41,7 +41,7 @@ def _sub(
     **conditions,
 ) -> SubQuery:
     values = {
-        "region": "", "age": None, "job_status": JobStatus.NONE, "school": SchoolLevel.NONE,
+        "region": "", "local_only": False, "age": None, "job_status": JobStatus.NONE, "school": SchoolLevel.NONE,
         "category": Category.NONE, **conditions,
     }
     return SubQuery(
@@ -161,15 +161,16 @@ async def test_standalone_question_and_search_query():
 
 async def test_conditions_kept_and_invalid_age_dropped():
     result = await analyzer.analyze(_ctx(PipelineInput(question="q"), FakeLLM(_parsed(
-        _sub("q", [], region=" 인천 부평구 ", age=32, job_status=JobStatus.UNEMPLOYED, school=SchoolLevel.GRADUATE_SCHOOL),
+        _sub("q", [], region=" 인천 부평구 ", age=32, job_status=JobStatus.UNEMPLOYED, school=SchoolLevel.GRADUATE_SCHOOL,
+             local_only=True),
         _sub("q2", [], age=250),
     ))))
 
     first, second = result.sub_queries
-    assert (first.region, first.age, first.job_status, first.school) == (
-        "인천 부평구", 32, JobStatus.UNEMPLOYED, SchoolLevel.GRADUATE_SCHOOL
+    assert (first.region, first.local_only, first.age, first.job_status, first.school) == (
+        "인천 부평구", True, 32, JobStatus.UNEMPLOYED, SchoolLevel.GRADUATE_SCHOOL
     )
-    assert second.age is None
+    assert (second.age, second.local_only) == (None, False)
 
 
 async def test_sub_queries_limited():
@@ -216,7 +217,7 @@ async def test_trace_after_success():
     trace = (await analyzer.analyze(_ctx(inp, llm))).to_trace()
 
     assert json.loads(json.dumps(trace)) == {
-        "prompt_version": "analyze_v8",
+        "prompt_version": "analyze_v9",
         "model": "fake-analysis-model",
         "tokens": {"prompt": 100, "completion": 20},
         "sub_queries": [{
@@ -228,6 +229,7 @@ async def test_trace_after_success():
             "intent": "policy_detail",
             "status_filter": "none",
             "region": "",
+            "local_only": False,
             "age": 27,
             "job_status": "없음",
             "school": "없음",

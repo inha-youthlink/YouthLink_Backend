@@ -68,6 +68,8 @@ class SubQuery(BaseModel):
     status_filter: StatusFilter
     # 질문에서 사용자가 직접 말한 조건. 말하지 않았으면 "", null, "없음"
     region: str
+    # 전국 정책을 빼고 프로필 지역 정책만 원함 ("인천만", "전국 말고"). 지역 이름만 말한 것과 구분
+    local_only: bool
     age: int | None
     job_status: JobStatus
     school: SchoolLevel

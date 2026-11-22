@@ -33,11 +33,12 @@ class FakeLLM:
     analysis_model = "fake-analysis-model"
 
     def __init__(
-        self, intent: Intent, refs: list[str], answer: str, region: str = "", queries: list[str] | None = None
+        self, intent: Intent, refs: list[str], answer: str, region: str = "", queries: list[str] | None = None,
+        local_only: bool = False,
     ) -> None:
         self._sub = SubQuery(
             standalone_question="질문", search_query="청년 주거 지원", target_refs=refs, compare_queries=queries or [], intent=intent,
-            status_filter=StatusFilter.NONE, region=region, age=None, job_status=JobStatus.NONE, school=SchoolLevel.NONE,
+            status_filter=StatusFilter.NONE, region=region, local_only=local_only, age=None, job_status=JobStatus.NONE, school=SchoolLevel.NONE,
             category=Category.NONE,
         )
         self._answer = answer
@@ -70,6 +71,13 @@ class FakeRetriever:
 
 
 class FakePolicyRepository:
+    def __init__(self) -> None:
+        self.filters: list = []
+
+    async def filter_policy_nos(self, policy_filter, today):
+        self.filters.append(policy_filter)
+        return ["P-RENT", "P-MOVE"]
+
     async def list_regions(self):
         return [RegionRow("11", "서울특별시", "강남구", "11680"), RegionRow("28", "인천광역시", "부평구", "28237")]
 
@@ -185,6 +193,19 @@ async def test_missing_card_number_clarifies_without_llm_answer():
 
 
 SEOUL = Profile(age=27, region_code="11680")
+
+
+# "강남만": 프로필 지역 정책만 찾게 전국 정책을 빼고, 답변이 알도록 조건 줄에 남김
+async def test_local_only_list_question_excludes_nationwide():
+    llm = FakeLLM(Intent.POLICY_LIST, [], "[소개: 1]\n1. 청년 월세 지원", region="강남", local_only=True)
+    deps = _deps(llm)
+
+    output = await run_pipeline(PipelineInput(question="강남만", profile=SEOUL), deps)
+
+    assert [f.exclude_nationwide for f in deps.policy_repository.filters] == [True]
+    assert deps.retriever.calls == 1
+    assert "지역 범위: 서울특별시 전체와 서울특별시 강남구 정책만 (전국 정책 제외)" in output.trace["conditions"]["lines"]
+    assert output.trace["analysis"]["sub_queries"][0]["local_only"] is True
 
 
 async def test_question_region_different_from_profile_clarifies():
