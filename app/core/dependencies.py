@@ -12,6 +12,7 @@ from app.core.rate_limit import RateLimitedError, RateLimits
 from app.core.session_lock import SessionLocks
 from app.llm.client import LLMClient
 from app.pipeline.retrieval.base import Retriever
+from app.repositories.agent_repository import AgentRepository
 from app.repositories.chat_repository import ChatRepository
 from app.repositories.common_code_repository import CommonCodeRepository
 from app.repositories.policy_repository import PolicyRepository
@@ -51,6 +52,10 @@ def get_chat_repository(request: Request) -> ChatRepository:
 
 def get_scrap_repository(request: Request) -> ScrapRepository:
     return request.app.state.scrap_repository
+
+
+def get_agent_repository(request: Request) -> AgentRepository:
+    return request.app.state.agent_repository
 
 
 def get_pipeline_deps(

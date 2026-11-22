@@ -286,9 +286,9 @@ interface AgentState {
 | `GET /api/sessions/{sessionId}/messages` | 메시지 이력 | 됨 |
 | `POST /api/sessions/{sessionId}/chat` | 채팅 (SSE, 5절) | 됨 |
 | `GET /api/sessions/{sessionId}/recommendations` | 추천 정책 | 됨 |
-| `GET /api/sessions/{sessionId}/agent` | 추천 에이전트 열기 (v1.4) | (나중) |
+| `GET /api/sessions/{sessionId}/agent` | 추천 에이전트 열기 (v1.4) | 됨 |
 | `POST /api/sessions/{sessionId}/agent/messages` | 추천 에이전트에 답하기 (SSE, 4.8) | (나중) |
-| `DELETE /api/sessions/{sessionId}/agent` | 추천 에이전트 새로 시작 (v1.4) | (나중) |
+| `DELETE /api/sessions/{sessionId}/agent` | 추천 에이전트 새로 시작 (v1.4) | 됨 |
 | `PUT /api/sessions/{sessionId}/current-policy` | 채팅에서 이야기할 정책 지정 (v1.4) | 됨 |
 | `POST /api/sessions/{sessionId}/summary` | 대화 요약 | 됨 |
 | `POST /api/sessions/{sessionId}/guides` | 신청 가이드 PDF 만들기 | 됨 (v1.3) |
@@ -436,7 +436,7 @@ interface AgentState {
 - 날짜·금액·링크·기관명은 공고 데이터에서 그대로 넣음. 공고에 없는 항목은 "공고에 나와 있지 않음"과 문의처
 - 세션 프로필의 1차 필터(채팅 추천과 같은 기준) 밖의 정책(검색·스크랩으로 연 다른 지역 정책 등)도 만들어 주되, 응답 `outsideProfile`이 `true`이고 PDF 첫 쪽 경고에 "프로필 조건으로 찾은 추천 정책이 아님"을 적음. 어느 조건이 안 맞는지는 알려 주지 않음 (자격 판정을 하지 않아서)
 
-### 4.8 추천 에이전트 (v1.4, 나중)
+### 4.8 추천 에이전트 (v1.4, 답하기 `POST`는 나중)
 채팅방 우측 패널. 에이전트가 먼저 묻고, 사용자가 답할 때마다 질문과 우측 카드가 바뀐다. 프로필은 그 채팅방의 프로필이고 다시 묻지 않는다. 채팅 대화와는 **따로** 저장되며 서로의 기록에 섞이지 않는다.
 
 **`GET /api/sessions/{sessionId}/agent`** → `200 AgentState`
@@ -622,7 +622,7 @@ data: {"messageId":"1234"}
 ## 8. 남은 일
 | 항목 | 상태 |
 |---|---|
-| 추천 에이전트 | 형식은 이 문서대로 (3.5, 4.8), 구현 중 |
+| 추천 에이전트 | 열기·새로 시작 구현됨, 답하기(`POST …/agent/messages`)는 구현 중 (3.5, 4.8) |
 | 채팅에서 이야기할 정책 지정 | 구현됨 (4.9, v1.4) |
 | 신청 가이드 PDF | 구현됨 (4.7, v1.3). 배포 경로에서 PDF 열림 확인 필요 |
 | 복합 질문 답변 | 형식은 이 문서대로 (5.3), 답변 동작은 구현 중. 정책 비교는 구현됨 (5.3). 개수 지정은 하지 않기로 함 (v1.4) |
