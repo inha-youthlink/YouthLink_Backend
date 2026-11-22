@@ -1,0 +1,540 @@
+{
+ "contexts": {
+  "대화없음": {
+   "history": [],
+   "shown": [],
+   "current": []
+  },
+  "교육목록뒤": {
+   "history": [
+    {
+     "question": "자격증이나 교육 지원 알려줘",
+     "answer": "자격증·교육 쪽으로 신청할 수 있는 정책을 소개해 드릴게요. 1. 국가기술자격 응시료 지원은…",
+     "policies": [
+      "국가기술자격 응시료 지원",
+      "청년 어학시험 응시료 지원",
+      "K-디지털 트레이닝"
+     ]
+    }
+   ],
+   "shown": [
+    "국가기술자격 응시료 지원",
+    "청년 어학시험 응시료 지원",
+    "K-디지털 트레이닝"
+   ],
+   "current": []
+  },
+  "저축상세뒤": {
+   "history": [
+    {
+     "question": "청년내일저축계좌 자세히 알려줘",
+     "answer": "청년내일저축계좌는 일하는 저소득 청년이 매달 저축하면 정부가 지원금을 더해 주는 정책이에요…",
+     "policies": [
+      "청년내일저축계좌"
+     ]
+    }
+   ],
+   "shown": [
+    "청년내일저축계좌"
+   ],
+   "current": [
+    "청년내일저축계좌"
+   ]
+  },
+  "저축둘": {
+   "history": [
+    {
+     "question": "청년도약계좌랑 청년내일저축계좌 알려줘",
+     "answer": "두 정책 모두 청년의 자산 형성을 돕는 저축 지원이에요. 1. 청년도약계좌는…",
+     "policies": [
+      "청년도약계좌",
+      "청년내일저축계좌"
+     ]
+    }
+   ],
+   "shown": [
+    "청년도약계좌",
+    "청년내일저축계좌"
+   ],
+   "current": [
+    "청년도약계좌",
+    "청년내일저축계좌"
+   ]
+  },
+  "월세목록뒤": {
+   "history": [
+    {
+     "question": "월세 지원 알려줘",
+     "answer": "청년 월세 지원 정책을 소개해 드릴게요. 1. (국토부) 청년월세 지원은…",
+     "policies": [
+      "(국토부) 청년월세 지원",
+      "청년 전월세 대출보증",
+      "서울시 청년월세 지원"
+     ]
+    }
+   ],
+   "shown": [
+    "(국토부) 청년월세 지원",
+    "청년 전월세 대출보증",
+    "서울시 청년월세 지원"
+   ],
+   "current": []
+  }
+ },
+ "cases": [
+  {
+   "id": "T01",
+   "context": "대화없음",
+   "question": "요즘 너무 우울해서 상담 같은 거 받아보고 싶은데 청년한테 지원해주는 거 있나요?",
+   "expect": {
+    "intent": "policy_list",
+    "category": "복지문화"
+   }
+  },
+  {
+   "id": "T02",
+   "context": "대화없음",
+   "question": "군대 다녀와서 복학하는데 등록금 도움 받을 데 있어?",
+   "expect": {
+    "intent": "policy_list",
+    "category": "교육"
+   }
+  },
+  {
+   "id": "T03",
+   "context": "대화없음",
+   "question": "취업했는데 첫 월급이 너무 적어서… 직장인도 저축 지원 받을 수 있어?",
+   "expect": {
+    "intent": "policy_list",
+    "category": "복지문화",
+    "job": "재직자"
+   }
+  },
+  {
+   "id": "T04",
+   "context": "대화없음",
+   "question": "청년월세지원 신청기간 언재까지에요",
+   "expect": {
+    "intent": "policy_detail",
+    "category": "주거",
+    "targets": []
+   }
+  },
+  {
+   "id": "T05",
+   "context": "대화없음",
+   "question": "버팀목 전세대출이랑 청년 전용 전세대출 금리 차이 알려줘",
+   "expect": {
+    "intent": "comparison",
+    "cmp": 2,
+    "category": "주거"
+   }
+  },
+  {
+   "id": "T06",
+   "context": "대화없음",
+   "question": "내일배움카드가 뭐예요",
+   "expect": {
+    "intent": "policy_detail",
+    "category": "교육",
+    "targets": []
+   }
+  },
+  {
+   "id": "T07",
+   "context": "대화없음",
+   "question": "해외 봉사 활동 지원하는 거 있어? 마감된 것도 보여줘",
+   "expect": {
+    "intent": "policy_list",
+    "category": "참여",
+    "status": "include_closed"
+   }
+  },
+  {
+   "id": "T08",
+   "context": "대화없음",
+   "question": "지금 접수 중인 창업 지원금만 골라서 알려줘",
+   "expect": {
+    "intent": "policy_list",
+    "category": "일자리",
+    "status": "open_only"
+   }
+  },
+  {
+   "id": "T09",
+   "context": "대화없음",
+   "question": "점심 메뉴 추천해줘",
+   "expect": {
+    "intent": "out_of_scope"
+   }
+  },
+  {
+   "id": "T10",
+   "context": "대화없음",
+   "question": "너 누가 만들었어?",
+   "expect": {
+    "intent": "chitchat"
+   }
+  },
+  {
+   "id": "T11",
+   "context": "대화없음",
+   "question": "자동차 보험료 싸게 하는 법 알려줘",
+   "expect": {
+    "intent": "out_of_scope"
+   }
+  },
+  {
+   "id": "T12",
+   "context": "대화없음",
+   "question": "대구 청년 정책 뭐 있어?",
+   "expect": {
+    "intent": "policy_list",
+    "local": true
+   }
+  },
+  {
+   "id": "T13",
+   "context": "대화없음",
+   "question": "광주 사는 25살 프리랜서인데 지원받을 만한 거 있을까",
+   "expect": {
+    "intent": "policy_list",
+    "local": false,
+    "age": 25,
+    "job": "프리랜서"
+   }
+  },
+  {
+   "id": "T14",
+   "context": "대화없음",
+   "question": "울산 거만 보여줘 취업 지원",
+   "expect": {
+    "intent": "policy_list",
+    "local": true,
+    "category": "일자리"
+   }
+  },
+  {
+   "id": "T15",
+   "context": "대화없음",
+   "question": "면접 정장 대여해주는 곳이랑 증명사진 지원 알려줘",
+   "expect": {
+    "intent": "policy_list",
+    "category": "일자리"
+   }
+  },
+  {
+   "id": "T16",
+   "context": "대화없음",
+   "question": "청년도약계좌, 청년내일저축계좌, 청년희망적금 셋 중에 뭐가 제일 이득이야?",
+   "expect": {
+    "intent": "comparison",
+    "cmp": 3
+   }
+  },
+  {
+   "id": "T17",
+   "context": "대화없음",
+   "question": "주거비 지원 뭐 있는지 알려주고, 청년도약계좌 신청 방법도 알려줘",
+   "expect": {
+    "subs": 2,
+    "intent": "policy_list,policy_detail"
+   }
+  },
+  {
+   "id": "T18",
+   "context": "교육목록뒤",
+   "question": "두번째꺼 토익도 돼?",
+   "expect": {
+    "intent": "policy_detail|eligibility",
+    "targets": [
+     "2"
+    ]
+   }
+  },
+  {
+   "id": "T19",
+   "context": "교육목록뒤",
+   "question": "3번은 돈 내야 돼?",
+   "expect": {
+    "intent": "policy_detail",
+    "targets": [
+     "3"
+    ]
+   }
+  },
+  {
+   "id": "T20",
+   "context": "교육목록뒤",
+   "question": "1번하고 2번 중에 어떤 게 더 많이 줘?",
+   "expect": {
+    "intent": "comparison",
+    "targets": [
+     "1",
+     "2"
+    ],
+    "cmp": 0
+   }
+  },
+  {
+   "id": "T21",
+   "context": "교육목록뒤",
+   "question": "나 고졸인데 마지막 거 들을 수 있어?",
+   "expect": {
+    "intent": "eligibility",
+    "targets": [
+     "3"
+    ],
+    "school": "고교 졸업"
+   }
+  },
+  {
+   "id": "T22",
+   "context": "교육목록뒤",
+   "question": "어학시험 그거 서류 뭐 필요해",
+   "expect": {
+    "intent": "policy_detail",
+    "targets": [
+     "2"
+    ]
+   }
+  },
+  {
+   "id": "T23",
+   "context": "교육목록뒤",
+   "question": "이런 거 말고 코딩 교육 쪽 더 없어?",
+   "expect": {
+    "intent": "policy_list",
+    "category": "교육",
+    "new": false
+   }
+  },
+  {
+   "id": "T24",
+   "context": "교육목록뒤",
+   "question": "응시료 지원 신청 방법 알려줘",
+   "expect": {
+    "intent": "unclear",
+    "targets": []
+   }
+  },
+  {
+   "id": "T25",
+   "context": "교육목록뒤",
+   "question": "세 개 다 같이 받을 수 있어?",
+   "expect": {
+    "intent": "eligibility",
+    "targets": [
+     "1",
+     "2",
+     "3"
+    ]
+   }
+  },
+  {
+   "id": "T26",
+   "context": "교육목록뒤",
+   "question": "갑자기 궁금한데 월세 지원은 뭐 있어?",
+   "expect": {
+    "intent": "policy_list",
+    "category": "주거",
+    "new": true
+   }
+  },
+  {
+   "id": "T27",
+   "context": "교육목록뒤",
+   "question": "1번이랑 내일배움카드 비교해줘",
+   "expect": {
+    "intent": "comparison",
+    "targets": [
+     "1"
+    ],
+    "cmp": 1
+   }
+  },
+  {
+   "id": "T28",
+   "context": "교육목록뒤",
+   "question": "감사합니다 그럼 1번 신청 기간은요?",
+   "expect": {
+    "intent": "policy_detail",
+    "targets": [
+     "1"
+    ]
+   }
+  },
+  {
+   "id": "T29",
+   "context": "저축상세뒤",
+   "question": "가입하면 한 달에 얼마 넣어야 돼?",
+   "expect": {
+    "intent": "policy_detail",
+    "targets": [
+     "1"
+    ]
+   }
+  },
+  {
+   "id": "T30",
+   "context": "저축상세뒤",
+   "question": "나 알바만 하는데 가입 돼?",
+   "expect": {
+    "intent": "eligibility",
+    "targets": [
+     "1"
+    ],
+    "job": "단기근로자"
+   }
+  },
+  {
+   "id": "T31",
+   "context": "저축상세뒤",
+   "question": "근로소득이 무슨 뜻이야?",
+   "expect": {
+    "intent": "policy_detail",
+    "targets": [
+     "1"
+    ]
+   }
+  },
+  {
+   "id": "T32",
+   "context": "저축상세뒤",
+   "question": "비트코인이 뭐야",
+   "expect": {
+    "intent": "out_of_scope"
+   }
+  },
+  {
+   "id": "T33",
+   "context": "저축상세뒤",
+   "question": "이거랑 청년도약계좌 뭐가 나아?",
+   "expect": {
+    "intent": "comparison",
+    "targets": [
+     "1"
+    ],
+    "cmp": 1
+   }
+  },
+  {
+   "id": "T34",
+   "context": "저축상세뒤",
+   "question": "비슷한 저축 상품 더 있어?",
+   "expect": {
+    "intent": "policy_list",
+    "category": "복지문화",
+    "new": false
+   }
+  },
+  {
+   "id": "T35",
+   "context": "저축상세뒤",
+   "question": "경기도 거만 보여줘",
+   "expect": {
+    "intent": "policy_list",
+    "local": true,
+    "category": "복지문화"
+   }
+  },
+  {
+   "id": "T36",
+   "context": "저축상세뒤",
+   "question": "중도에 해지하면 어떻게 돼?",
+   "expect": {
+    "intent": "policy_detail",
+    "targets": [
+     "1"
+    ]
+   }
+  },
+  {
+   "id": "T37",
+   "context": "저축둘",
+   "question": "가입 조건은?",
+   "expect": {
+    "intent": "unclear",
+    "targets": []
+   }
+  },
+  {
+   "id": "T38",
+   "context": "저축둘",
+   "question": "둘 다 가입할 수 있어?",
+   "expect": {
+    "intent": "eligibility",
+    "targets": [
+     "1",
+     "2"
+    ]
+   }
+  },
+  {
+   "id": "T39",
+   "context": "저축둘",
+   "question": "도약계좌 만기가 몇 년이야?",
+   "expect": {
+    "intent": "policy_detail",
+    "targets": [
+     "1"
+    ]
+   }
+  },
+  {
+   "id": "T40",
+   "context": "저축둘",
+   "question": "둘 중에 이자 더 많이 주는 거?",
+   "expect": {
+    "intent": "comparison",
+    "targets": [
+     "1",
+     "2"
+    ],
+    "cmp": 0
+   }
+  },
+  {
+   "id": "T41",
+   "context": "월세목록뒤",
+   "question": "서울만",
+   "expect": {
+    "intent": "policy_list",
+    "local": true,
+    "category": "주거"
+   }
+  },
+  {
+   "id": "T42",
+   "context": "월세목록뒤",
+   "question": "서울 사는데 1번 받을 수 있어?",
+   "expect": {
+    "intent": "eligibility",
+    "targets": [
+     "1"
+    ],
+    "local": false
+   }
+  },
+  {
+   "id": "T43",
+   "context": "월세목록뒤",
+   "question": "월세 말고 전세 쪽은?",
+   "expect": {
+    "intent": "policy_list",
+    "category": "주거",
+    "new": false
+   }
+  },
+  {
+   "id": "T44",
+   "context": "월세목록뒤",
+   "question": "마감된 것도 다 보여줘",
+   "expect": {
+    "intent": "policy_list",
+    "category": "주거",
+    "status": "include_closed"
+   }
+  }
+ ]
+}
