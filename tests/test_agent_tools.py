@@ -121,10 +121,18 @@ async def test_search_result_lines():
 
 async def test_search_sub_categories_and_unknown_names():
     tools, policies, _ = _tools()
-    output = await tools.execute("search_policies", _search(sub_categories=["주택 및 거주지", "주택·거주지"]))
+    output = await tools.execute("search_policies", _search(sub_categories=["주택 및 거주지", "공공임대·주택"]))
     assert policies.filters[1].middle_categories == ("주택 및 거주지",)
-    assert "세부 분류 이름이 아니라 빼고 찾음: 주택·거주지" in output
+    assert "세부 분류 이름이 아니라 빼고 찾음: 공공임대·주택" in output
     assert tools.records[0].policy_nos == ["H1"]
+
+
+# 선택지 글자처럼 띄어쓰기·"·"·"및"만 다른 이름은 실제 이름으로 맞춤
+async def test_search_sub_categories_loose_names():
+    tools, policies, _ = _tools()
+    output = await tools.execute("search_policies", _search(sub_categories=["주택·거주지", "전월세 및 주거급여지원"]))
+    assert policies.filters[1].middle_categories == ("전월세 및 주거급여 지원", "주택 및 거주지")
+    assert "빼고 찾음" not in output
 
 
 async def test_search_local_only_drops_nationwide():
