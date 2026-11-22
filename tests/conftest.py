@@ -19,6 +19,7 @@ from app.core.rate_limit import RateLimits
 from app.core.session_lock import SessionLocks
 from app.main import app
 from app.pipeline.runner import AnswerToken, PipelineEvent, PolicyCards
+from app.repositories.agent_repository import AgentRepository
 from app.repositories.chat_repository import ChatRepository, QuestionRecord, RoomRecord
 from app.repositories.policy_repository import PolicyDetailRecord, RegionRow
 from app.schemas.chat import MessageItem
@@ -283,6 +284,11 @@ async def session_factory(test_database_url: str) -> AsyncIterator[async_session
 @pytest.fixture
 def chat_repository(session_factory: async_sessionmaker) -> ChatRepository:
     return ChatRepository(session_factory)
+
+
+@pytest.fixture
+def agent_repository(session_factory: async_sessionmaker) -> AgentRepository:
+    return AgentRepository(session_factory)
 
 
 def _asyncpg_dsn(url: str, database: str | None = None) -> str:
