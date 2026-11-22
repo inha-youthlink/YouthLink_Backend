@@ -1,3 +1,4 @@
+import re
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -30,6 +31,9 @@ NOTICE_KEEP_HEIGHT = 45
 CELL_PADDING = (1.5, 2)
 # fpdf2 표는 한 행을 여러 페이지로 나누지 못해, 한 칸이 페이지를 넘지 않을 길이로 자름 (단계·용어 설명은 보통 100자 안쪽)
 CELL_MAX_CHARS = 400
+# 긴 URL이 두 줄로 넘어가면 뷰어의 자동 링크 인식이 첫 줄만 잡아 깨진 주소로 가서, 칸 전체에 원래 주소 링크를 걸고 글자를 줄임
+URL_FONT_SIZE = 8.5
+_URL = re.compile(r"https?://\S+")
 
 NOTICE_TEXT = (
     "이 가이드는 공고 데이터와 대화 내용을 바탕으로 자동으로 만든 참고 자료입니다. "
@@ -256,8 +260,12 @@ class _GuidePdf(FPDF):
         documents = f"제출 서류 {len(content.documents)}개" if content.documents else "제출 서류 목록 공고에 없음"
         rows = [*content.overview, ("준비할 것", f"{steps} · {documents}")]
         self.set_draw_color(*SUMMARY_FILL)
+        # 항목 이름이 짧아 고정 비율(24%)은 왼쪽이 비고 오른쪽 URL이 더 접혀, 가장 긴 항목 이름에 맞춤
+        self.set_font(FONT_FAMILY, "B", 10)
+        label_width = max(self.get_string_width(_cell(label)) for label, _ in rows) + 2 * CELL_PADDING[1] + 2
+        self.set_font(FONT_FAMILY, "", 10)
         with self.table(
-            col_widths=(24, 76),
+            col_widths=(label_width, self.epw - label_width),
             first_row_as_headings=False,
             text_align="LEFT",
             line_height=LINE_HEIGHT,
@@ -266,10 +274,15 @@ class _GuidePdf(FPDF):
             cell_fill_mode="ALL",
         ) as table:
             label_style = FontFace(emphasis="BOLD")
+            url_style = FontFace(color=ACCENT_COLOR, size_pt=URL_FONT_SIZE)
             for label, value in rows:
                 row = table.row()
                 row.cell(_cell(label), style=label_style)
-                row.cell(_cell(value))
+                url = _url(value)
+                if url:
+                    row.cell(_cell(value), style=url_style, link=url)
+                else:
+                    row.cell(_cell(value))
         if content.alerts:
             self.ln(1)
             self.set_text_color(*ALERT_COLOR)
@@ -287,14 +300,14 @@ class _GuidePdf(FPDF):
         self.set_font(FONT_FAMILY, "B", 10)
         self.write_line("꼭 확인해 주세요", fill=True)
         self.set_font(FONT_FAMILY, "", 9.5)
-        lines = [NOTICE_TEXT]
-        if content.source_url:
-            lines.append(f"공고 확인: {content.source_url}")
+        self.write_line(NOTICE_TEXT, fill=True)
+        url = _url(content.source_url or "")
+        if url:
+            self.multi_cell(0, LINE_HEIGHT, _clean(f"공고 확인: {url}"), fill=True, align="L", link=url,
+                            new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         if content.synced_on:
-            lines.append(f"정책 정보 기준일: {content.synced_on.isoformat()}")
-        lines.append(f"만든 시각: {content.generated_at.strftime('%Y-%m-%d %H:%M')}")
-        for line in lines:
-            self.write_line(line, fill=True)
+            self.write_line(f"정책 정보 기준일: {content.synced_on.isoformat()}", fill=True)
+        self.write_line(f"만든 시각: {content.generated_at.strftime('%Y-%m-%d %H:%M')}", fill=True)
 
 
 @lru_cache
@@ -311,6 +324,12 @@ def _markdown_safe(text: str) -> str:
         while marker in text:
             text = text.replace(marker, marker[0])
     return text
+
+
+# 값 전체가 URL일 때만 (설명 글 속 URL은 칸 전체를 링크로 만들면 안 됨)
+def _url(text: str) -> str | None:
+    value = text.strip()
+    return value if _URL.fullmatch(value) else None
 
 
 def _cell(text: str) -> str:

@@ -1,3 +1,4 @@
+import re
 from dataclasses import replace
 from datetime import date, datetime
 
@@ -101,6 +102,24 @@ def test_render_long_cells():
     content = replace(CONTENT, steps=[(long_text, long_text)] * 5, conditions=[long_text] * 10)
 
     assert render_guide_pdf(content).startswith(b"%PDF")
+
+
+# 긴 URL이 두 줄로 접혀도 줄마다 원래 주소 전체로 링크가 걸림 (뷰어 자동 인식은 첫 줄만 잡음)
+def test_render_wrapped_url_links_full_address():
+    url = "https://youth.incheon.go.kr/youthpolicy/youthPolicyInfoDetail.do?poly_seq=395&page=" + "1" * 80
+    content = replace(CONTENT, overview=[("담당 기관", "인천광역시 중구"), ("신청 사이트", url)], source_url=url)
+
+    links = re.findall(rb"/URI \(([^)]*)\)", render_guide_pdf(content))
+
+    # 요약 표 칸 2줄 + 안내 상자 줄들, 모두 잘리지 않은 주소
+    assert len(links) >= 3
+    assert set(links) == {url.encode()}
+
+
+def test_url_only_for_whole_value():
+    assert guide_pdf._url(" https://example.go.kr/a?b=1 ") == "https://example.go.kr/a?b=1"
+    assert guide_pdf._url("홈페이지 https://example.go.kr 참고") is None
+    assert guide_pdf._url("서울특별시") is None
 
 
 @pytest.mark.parametrize(
