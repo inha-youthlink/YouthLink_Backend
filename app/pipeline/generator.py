@@ -22,7 +22,7 @@ COMPARE_CARDS_PROMPT = "answer_compare_cards_v1"
 # answer_compare_cards_v1의 규칙 문구와 같아야 함
 POINTED_MARK = "사용자가 가리킨 정책"
 KIND_PROMPTS = {
-    AnswerKind.RECOMMEND: "answer_recommend_v1",
+    AnswerKind.RECOMMEND: "answer_recommend_v2",
     AnswerKind.DETAIL: "answer_detail_v2",
     AnswerKind.COMPARE: "answer_compare_v1",
 }

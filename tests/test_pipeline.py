@@ -128,7 +128,7 @@ async def test_list_question_searches_and_llm_picks_cards():
     assert [policy.policy_no for policy in output.policies] == ["P-MOVE"]
     assert output.answer == "1. 청년 이사비 지원"
     assert (output.trace["handler"], output.trace["answer_kind"]) == ("search", "recommend")
-    assert output.trace["prompt_version"] == "answer_common_v2+answer_cards_v2+answer_recommend_v1"
+    assert output.trace["prompt_version"] == "answer_common_v2+answer_cards_v2+answer_recommend_v2"
     assert output.trace["cards"] == {"candidate_nos": ["P-RENT", "P-MOVE"], "selected": [2], "fallback": False}
     assert output.trace["conditions"]["filtered_policy_count"] is None
     # 프로필이 없어 필터를 걸지 않음
