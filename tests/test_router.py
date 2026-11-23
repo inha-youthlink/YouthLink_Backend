@@ -3,7 +3,7 @@ import pytest
 from app.pipeline.analyzer import AnalysisResult, FallbackReason, ResolvedSubQuery
 from app.pipeline.conditions import Mismatch, SearchConditions
 from app.pipeline.evidence import AnswerKind
-from app.pipeline.router import Handler, Route, choose_route
+from app.pipeline.router import Handler, Route, SubKind, choose_route, sub_kind
 from app.schemas.analysis import Intent, StatusFilter
 from app.schemas.pipeline import PolicyRef
 
@@ -38,13 +38,14 @@ SHORT = Route(Handler.SHORT, AnswerKind.SHORT)
 CLARIFY = Route(Handler.CLARIFY, AnswerKind.CLARIFY)
 COMPARE = Route(Handler.COMPARE, AnswerKind.COMPARE)
 COMPARE_LIMIT = Route(Handler.COMPARE, AnswerKind.CLARIFY)
+COMPOSITE = Route(Handler.COMPOSITE, AnswerKind.COMPOSITE)
 
 
 @pytest.mark.parametrize(
     ("analysis", "route"),
     [
         (_analysis(failed=True), SEARCH_RECOMMEND),
-        (_analysis(_sub(Intent.POLICY_DETAIL, [RENT]), _sub(Intent.POLICY_LIST)), SEARCH_RECOMMEND),
+        (_analysis(_sub(Intent.POLICY_DETAIL, [RENT]), _sub(Intent.POLICY_LIST)), COMPOSITE),
         (_analysis(_sub(Intent.CHITCHAT)), SHORT),
         (_analysis(_sub(Intent.OUT_OF_SCOPE)), SHORT),
         (_analysis(_sub(Intent.UNCLEAR)), CLARIFY),
@@ -123,3 +124,62 @@ def test_comparison_routes(sub, route):
 )
 def test_comparison_region_mismatch(sub, route):
     assert choose_route(_analysis(sub), REGION_MISMATCH) == route
+
+
+@pytest.mark.parametrize(
+    ("analysis", "route"),
+    [
+        (_analysis(_sub(Intent.POLICY_LIST), _sub(Intent.POLICY_LIST)), COMPOSITE),
+        (_analysis(_sub(Intent.POLICY_LIST), _sub(Intent.OUT_OF_SCOPE)), COMPOSITE),
+        (_analysis(_sub(Intent.CHITCHAT), _sub(Intent.POLICY_LIST)), COMPOSITE),
+        (_analysis(_sub(Intent.COMPARISON, [RENT, MOVE]), _sub(Intent.POLICY_LIST)), COMPOSITE),
+        # 모두 지목이면 상세 핸들러가 모든 하위 질문의 대상을 모음
+        (_analysis(_sub(Intent.POLICY_DETAIL, [RENT]), _sub(Intent.ELIGIBILITY, [MOVE])), DETAIL),
+        # 지목했어도 없는 카드 번호가 섞이면 지목만으로 볼 수 없음
+        (_analysis(_sub(Intent.POLICY_DETAIL, [RENT]), _sub(Intent.POLICY_DETAIL, [MOVE], unresolved=["5"])), COMPOSITE),
+        (_analysis(_sub(Intent.POLICY_LIST), _sub(Intent.POLICY_LIST), failed=True), SEARCH_RECOMMEND),
+        # 답할 하위 질문이 없으면 짧은 답변. 불명확이 섞이면 복합 답변이 이유를 안내함
+        (_analysis(_sub(Intent.CHITCHAT), _sub(Intent.CHITCHAT)), SHORT),
+        (_analysis(_sub(Intent.CHITCHAT), _sub(Intent.OUT_OF_SCOPE)), SHORT),
+        (_analysis(_sub(Intent.OUT_OF_SCOPE), _sub(Intent.UNCLEAR)), COMPOSITE),
+    ],
+)
+def test_composite_routes(analysis, route):
+    assert choose_route(analysis, SearchConditions()) == route
+
+
+@pytest.mark.parametrize(
+    ("analysis", "route"),
+    [
+        (_analysis(_sub(Intent.POLICY_DETAIL, [RENT]), _sub(Intent.POLICY_LIST)), CLARIFY),
+        # 비교는 복합 안에서 답하지 않아 검색하지 않음
+        (_analysis(_sub(Intent.COMPARISON, [RENT], queries=["청년도약계좌"]), _sub(Intent.OUT_OF_SCOPE)), COMPOSITE),
+        # 검색하는 하위 질문이 없으면 프로필로 거르지 않아 되묻지 않음
+        (_analysis(_sub(Intent.POLICY_DETAIL, [RENT]), _sub(Intent.OUT_OF_SCOPE)), COMPOSITE),
+        (_analysis(_sub(Intent.COMPARISON, [RENT, MOVE]), _sub(Intent.UNCLEAR)), COMPOSITE),
+    ],
+)
+def test_composite_region_mismatch_clarifies_only_when_searching(analysis, route):
+    assert choose_route(analysis, REGION_MISMATCH) == route
+
+
+@pytest.mark.parametrize(
+    ("sub", "kind"),
+    [
+        (_sub(Intent.CHITCHAT), SubKind.IGNORE),
+        (_sub(Intent.OUT_OF_SCOPE), SubKind.OUT_OF_SCOPE),
+        (_sub(Intent.UNCLEAR), SubKind.UNCLEAR),
+        (_sub(Intent.POLICY_DETAIL, [RENT], unresolved=["5"]), SubKind.UNCLEAR),
+        (_sub(Intent.COMPARISON, [RENT, MOVE]), SubKind.COMPARE),
+        (_sub(Intent.COMPARISON, [RENT, MOVE, LOAN]), SubKind.COMPARE),
+        (_sub(Intent.COMPARISON, queries=["청년도약계좌", "내일저축계좌"]), SubKind.COMPARE),
+        (_sub(Intent.COMPARISON, [RENT]), SubKind.TARGET),
+        (_sub(Intent.COMPARISON, queries=["청년도약계좌"]), SubKind.SEARCH),
+        (_sub(Intent.POLICY_DETAIL, [RENT]), SubKind.TARGET),
+        (_sub(Intent.POLICY_DETAIL), SubKind.SEARCH),
+        (_sub(Intent.ELIGIBILITY), SubKind.SEARCH),
+        (_sub(Intent.POLICY_LIST, [RENT]), SubKind.SEARCH),
+    ],
+)
+def test_sub_kind(sub, kind):
+    assert sub_kind(sub) == kind

@@ -81,6 +81,32 @@ def build_cards(
     ]
 
 
+# 프론트 카드 영역이 단일 질문 기준(최대 3개)이라 복합 질문도 넘지 않게 함 (answer_composite_cards_v1과 같은 수)
+COMPOSITE_MAX_CARDS = 3
+
+
+# 복합 질문 카드는 묶음마다 1개 이상. 지목한 정책은 항상 넣고, 묶음을 빠뜨리면 그 묶음의 1위를 씀
+# 넘치면 뒤 묶음부터 하나만 남기고 덜어냄. 지목한 정책만으로 넘치면 그대로 둠 (핸들러가 하위 질문 단위로 미리 막음)
+def composite_card_numbers(numbers: list[int] | None, groups: list[CompareGroup]) -> list[int]:
+    chosen: list[list[int]] = []
+    start = 1
+    for group in groups:
+        span = list(range(start, start + group.size))
+        if group.fixed:
+            picked = span
+        else:
+            picked = [number for number in (numbers or []) if number in span] or span[:1]
+        chosen.append(picked)
+        start += group.size
+
+    fixed_count = sum(len(picked) for picked, group in zip(chosen, groups, strict=True) if group.fixed)
+    limit = max(COMPOSITE_MAX_CARDS, fixed_count)
+    for picked, group in reversed(list(zip(chosen, groups, strict=True))):
+        while sum(map(len, chosen)) > limit and not group.fixed and len(picked) > 1:
+            picked.pop()
+    return [number for picked in chosen for number in picked]
+
+
 # 비교 카드는 대상마다 0~1개. 지목한 정책은 항상 넣고, 한 대상에서 여럿을 고르거나 첫 줄 형식을 어기면 그 대상의 1위를 씀
 def compare_card_numbers(numbers: list[int] | None, groups: list[CompareGroup]) -> list[int]:
     chosen: list[int] = []

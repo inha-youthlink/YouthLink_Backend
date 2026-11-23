@@ -14,9 +14,10 @@ class AnswerKind(StrEnum):
     SHORT = "short"
     CLARIFY = "clarify"
     COMPARE = "compare"
+    COMPOSITE = "composite"
 
 
-# 비교 대상 하나의 근거 구간. candidates 순서대로 size개씩 차지함
+# 근거 구간 하나 (비교 대상 하나, 복합 질문에서는 하위 질문 하나). candidates 순서대로 size개씩 차지함
 @dataclass(frozen=True)
 class CompareGroup:
     name: str
@@ -40,3 +41,7 @@ class Evidence:
     reply: str | None = None
     # 비교 답변에서 대상마다 하나를 고르도록 근거를 나눈 구간
     compare_groups: list[CompareGroup] = field(default_factory=list)
+    # 복합 질문에서 하위 질문마다 카드를 하나 이상 보이도록 근거를 나눈 구간
+    composite_groups: list[CompareGroup] = field(default_factory=list)
+    # 복합 질문의 [질문] 목록. 답하지 않을 하위 질문에는 이유 표시가 붙음
+    question_lines: list[str] = field(default_factory=list)
