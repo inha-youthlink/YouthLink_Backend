@@ -113,6 +113,8 @@ async def test_clarify_general_reply_without_options():
 
     assert evidence.candidates == []
     assert evidence.reply == clarify.GENERAL_REPLY
+    # 가리킬 정책이 없으면 대화로 좁혀 주는 에이전트를 안내함
+    assert f"**{clarify.AGENT_NAME}**" in evidence.reply
 
 
 async def test_clarify_condition_mismatch_without_cards():
