@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from app.llm.client import ChatUsage
-from app.pipeline.cards import compare_card_numbers, status_of
+from app.pipeline.cards import compare_card_numbers, composite_card_numbers, status_of
 from app.pipeline.conditions import load_code_names, load_regions
 from app.pipeline.context import PipelineContext
 from app.pipeline.evidence import AnswerKind, CompareGroup
@@ -19,8 +19,14 @@ COMMON_PROMPT = "answer_common_v2"
 CARDS_PROMPT = "answer_cards_v2"
 # 비교는 "최대 3개"가 아니라 대상마다 하나를 골라 추천과 고르는 규칙이 다름
 COMPARE_CARDS_PROMPT = "answer_compare_cards_v1"
-# answer_compare_cards_v1의 규칙 문구와 같아야 함
+# 복합 질문은 하위 질문 묶음마다 고르고 합쳐서 최대 3개
+COMPOSITE_CARDS_PROMPT = "answer_composite_cards_v1"
+# 복합 질문은 추천 답변 규칙(형식·판단할 수 없는 기준)을 물려받고 차이만 덧붙임
+COMPOSITE_PROMPT = "answer_composite_v1"
+# answer_compare_cards_v1·answer_composite_cards_v1의 규칙 문구와 같아야 함
 POINTED_MARK = "사용자가 가리킨 정책"
+# 분석이 상한(3개)을 넘는 하위 질문을 버린 경우. 모델에 맡기면 빠뜨릴 수 있어 코드가 붙임
+DROPPED_NOTICE = "한 번에 세 가지까지 답할 수 있어서, 나머지 질문은 따로 물어봐 주세요."
 KIND_PROMPTS = {
     AnswerKind.RECOMMEND: "answer_recommend_v2",
     AnswerKind.DETAIL: "answer_detail_v2",
@@ -107,10 +113,14 @@ async def generate_stream(ctx: PipelineContext) -> AsyncGenerator[GenerationEven
         contexts: list[str] = []
         user_message = f"[질문]\n{ctx.query}"
     else:
-        cards_prompt = COMPARE_CARDS_PROMPT if ctx.answer_kind == AnswerKind.COMPARE else CARDS_PROMPT
-        prompt_names = [
-            COMMON_PROMPT, *([] if evidence.fixed_cards else [cards_prompt]), KIND_PROMPTS[ctx.answer_kind]
-        ]
+        cards_prompt = {
+            AnswerKind.COMPARE: COMPARE_CARDS_PROMPT, AnswerKind.COMPOSITE: COMPOSITE_CARDS_PROMPT
+        }.get(ctx.answer_kind, CARDS_PROMPT)
+        kind_prompts = (
+            [KIND_PROMPTS[AnswerKind.RECOMMEND], COMPOSITE_PROMPT]
+            if ctx.answer_kind == AnswerKind.COMPOSITE else [KIND_PROMPTS[ctx.answer_kind]]
+        )
+        prompt_names = [COMMON_PROMPT, *([] if evidence.fixed_cards else [cards_prompt]), *kind_prompts]
         contexts = _format_evidence(evidence.candidates, evidence.policies, evidence.documents, ctx.today)
         user_message = await _user_message(ctx, contexts)
 
@@ -152,6 +162,11 @@ async def generate_stream(ctx: PipelineContext) -> AsyncGenerator[GenerationEven
         numbers = _checked_numbers(ctx, card_line.numbers)
         yield CardsDecided(numbers)
         text = body.feed(card_line.body)
+        if text:
+            yield AnswerDelta(text)
+
+    if ctx.analysis is not None and ctx.analysis.dropped_sub_queries:
+        text = body.feed(f"\n\n{DROPPED_NOTICE}")
         if text:
             yield AnswerDelta(text)
 
@@ -212,34 +227,49 @@ async def _user_message(ctx: PipelineContext, contexts: list[str]) -> str:
     # 근거가 조건으로 걸러졌음을 알아야 프로필과 다른 조건을 안내하고, 결과가 없을 때 이유를 말할 수 있음
     if ctx.evidence.filtered and ctx.conditions and ctx.conditions.lines:
         sections.append("[검색 조건]\n" + "\n".join(ctx.conditions.lines))
-    groups = ctx.evidence.compare_groups
-    evidence = _compare_evidence(contexts, groups) if groups else "\n\n".join(contexts) or NO_EVIDENCE
-    sections += [f"[근거]\n{evidence}", f"[질문]\n{ctx.query}"]
+    if ctx.evidence.compare_groups:
+        evidence = _compare_evidence(contexts, ctx.evidence.compare_groups)
+    elif ctx.evidence.composite_groups:
+        evidence = _grouped_evidence(contexts, ctx.evidence.composite_groups)
+    else:
+        evidence = "\n\n".join(contexts) or NO_EVIDENCE
+    # 복합 질문은 하위 질문 목록으로 줘야 답할 질문과 이유만 안내할 질문을 구분함
+    question = "\n".join(ctx.evidence.question_lines) or ctx.query
+    sections += [f"[근거]\n{evidence}", f"[질문]\n{question}"]
     return "\n\n".join(sections)
 
 
 # 근거만 보고는 어느 후보가 어느 대상의 것인지 알 수 없어 대상별 머리말로 나눔. 근거 블록(contexts)은 그대로 둠
 # 검색한 대상도 후보가 하나뿐일 수 있어, 고를 필요 없는 지목 대상은 후보 수가 아니라 표시로 알림
 def _compare_evidence(contexts: list[str], groups: list[CompareGroup]) -> str:
+    named = [CompareGroup(f"비교 대상 {order}: {group.name}", group.size, group.fixed) for order, group in
+             enumerate(groups, start=1)]
+    return _grouped_evidence(contexts, named)
+
+
+# 복합 질문은 핸들러가 붙인 이름("질문 1: …")을 머리말로 씀
+def _grouped_evidence(contexts: list[str], groups: list[CompareGroup]) -> str:
     parts = []
     start = 0
-    for order, group in enumerate(groups, start=1):
+    for group in groups:
         blocks = contexts[start:start + group.size]
         mark = f" ({POINTED_MARK})" if group.fixed else ""
-        head = f"[비교 대상 {order}: {group.name}{mark}]"
+        head = f"[{group.name}{mark}]"
         parts.append("\n\n".join([head, *blocks]) if blocks else f"{head}\n{NO_EVIDENCE}")
         start += group.size
     return "\n\n".join(parts)
 
 
-# 비교가 아니면 그대로 둠. 고친 경우는 평가에서 LLM이 규칙을 얼마나 어기는지 보려고 남김
+# 비교·복합이 아니면 그대로 둠. 고친 경우는 평가에서 LLM이 규칙을 얼마나 어기는지 보려고 남김
 def _checked_numbers(ctx: PipelineContext, numbers: list[int] | None) -> list[int] | None:
-    groups = ctx.evidence.compare_groups
-    if not groups:
+    if ctx.evidence.compare_groups:
+        checked, key = compare_card_numbers(numbers, ctx.evidence.compare_groups), "compare"
+    elif ctx.evidence.composite_groups:
+        checked, key = composite_card_numbers(numbers, ctx.evidence.composite_groups), "composite"
+    else:
         return numbers
-    checked = compare_card_numbers(numbers, groups)
     if checked != numbers:
-        ctx.trace.setdefault("compare", {})["card_line_fixed"] = True
+        ctx.trace.setdefault(key, {})["card_line_fixed"] = True
     return checked
 
 

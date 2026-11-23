@@ -296,3 +296,40 @@ async def test_comparison_with_name_searches_other_target():
     ]
     assert [policy.policy_no for policy in output.policies] == ["P-RENT", "P-MOVE"]
     assert output.answer == "비교해 드릴게요."
+
+
+class CompositeLLM(FakeLLM):
+    def __init__(self, subs: list[SubQuery], answer: str) -> None:
+        super().__init__(Intent.POLICY_LIST, [], answer)
+        self._subs = subs
+
+    async def analyze(self, messages, text_format):
+        return ParsedResult(QueryAnalysis(sub_queries=self._subs, is_new_topic=False), 50, 10)
+
+
+def _sub(question: str, intent: Intent, refs: list[str] | None = None) -> SubQuery:
+    return SubQuery(
+        standalone_question=question, search_query=question, target_refs=refs or [], compare_queries=[], intent=intent,
+        status_filter=StatusFilter.NONE, region="", local_only=False, age=None, job_status=JobStatus.NONE,
+        school=SchoolLevel.NONE, category=Category.NONE,
+    )
+
+
+# 지목 + 검색 + 범위 밖이 섞이면 복합 경로로 가서 하위 질문마다 따로 근거를 모으고 답변은 한 번
+async def test_composite_question_collects_per_sub_question():
+    subs = [
+        _sub("청년 월세 지원 신청 기간", Intent.POLICY_DETAIL, ["1"]),
+        _sub("청년 주거 지원 정책", Intent.POLICY_LIST),
+        _sub("중위소득이 뭐야", Intent.OUT_OF_SCOPE),
+    ]
+    llm = CompositeLLM(subs, "[소개: 1,2]\n월세 지원 신청 기간은 …")
+    deps = _deps(llm)
+
+    output = await run_pipeline(PipelineInput(question="1번 신청 기간이랑 주거 지원, 중위소득 알려줘", history=SHOWN), deps)
+
+    assert (output.trace["handler"], output.trace["answer_kind"]) == ("composite", "composite")
+    assert deps.retriever.calls == 1
+    assert llm.chat_calls == 1
+    # 지목한 정책은 검색 묶음에 다시 넣지 않음
+    assert [policy.policy_no for policy in output.policies] == ["P-RENT", "P-MOVE"]
+    assert output.trace["composite"]["questions"][2] == "3. 중위소득이 뭐야 (따로 답하지 않음: 청년 정책 질문이 아님)"

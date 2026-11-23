@@ -5,6 +5,7 @@ import pytest
 from app.pipeline.cards import (
     build_cards,
     compare_card_numbers,
+    composite_card_numbers,
     local_first,
     pick_candidates,
 )
@@ -212,3 +213,40 @@ def test_compare_card_numbers_skip_empty_group():
     groups = [CompareGroup("청년도약계좌", 0, fixed=False), CompareGroup("내일저축계좌", 2, fixed=False)]
 
     assert compare_card_numbers(None, groups) == [1]
+
+
+# 검색 묶음 2개(1~3, 4~5) + 지목 1개(6)
+COMPOSITE_GROUPS = [
+    CompareGroup("질문 1", 3, fixed=False),
+    CompareGroup("질문 2", 2, fixed=False),
+    CompareGroup("질문 3", 1, fixed=True),
+]
+
+
+@pytest.mark.parametrize(
+    ("numbers", "chosen"),
+    [
+        ([1, 4], [1, 4, 6]),
+        # 빠뜨린 묶음은 그 묶음 1위, 지목은 항상
+        ([2, 3], [2, 4, 6]),
+        (None, [1, 4, 6]),
+        ([], [1, 4, 6]),
+        # 넘치면 뒤 묶음부터 하나만 남기고 덜어냄
+        ([1, 2, 3, 4, 5], [1, 4, 6]),
+    ],
+)
+def test_composite_card_numbers(numbers, chosen):
+    assert composite_card_numbers(numbers, COMPOSITE_GROUPS) == chosen
+
+
+def test_composite_card_numbers_fill_up_to_three():
+    groups = [CompareGroup("질문 1", 3, fixed=False), CompareGroup("질문 2", 2, fixed=False)]
+
+    assert composite_card_numbers([1, 2, 4, 5], groups) == [1, 2, 4]
+    assert composite_card_numbers([1, 2, 4], groups) == [1, 2, 4]
+
+
+# 빈 묶음(검색 결과 없음)은 자리를 차지하지 않고, 지목만으로 넘치면 줄이지 않음
+def test_composite_card_numbers_empty_group_and_many_targets():
+    assert composite_card_numbers([1], [CompareGroup("질문 1", 1, False), CompareGroup("질문 2", 0, False)]) == [1]
+    assert composite_card_numbers(None, [CompareGroup("질문 1", 4, fixed=True)]) == [1, 2, 3, 4]

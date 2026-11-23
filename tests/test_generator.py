@@ -6,6 +6,7 @@ from app.core.config import Settings
 from app.core.dependencies import PipelineDeps
 from app.llm.client import ChatUsage, LLMStreamError
 from app.pipeline import generator
+from app.pipeline.analyzer import AnalysisResult
 from app.pipeline.conditions import RegionIndex, build_conditions
 from app.pipeline.context import PipelineContext
 from app.pipeline.evidence import AnswerKind, CompareGroup, Evidence
@@ -393,3 +394,78 @@ async def test_compare_targets_only_skip_card_line():
     assert result.prompt_version == "answer_common_v2+answer_compare_v1"
     assert "[소개:" not in _system_prompt(llm)
     assert result.card_numbers == [1, 2]
+
+
+# 월세 묶음 2개(1~2) + 지목 1개(3)
+COMPOSITE_GROUPS = [CompareGroup("질문 1: 월세 지원", 2, fixed=False), CompareGroup("질문 2: 도약계좌 신청 기간", 1, fixed=True)]
+COMPOSITE_LINES = ["1. 월세 지원", "2. 도약계좌 신청 기간", "3. 중위소득이 뭐야 (따로 답하지 않음: 청년 정책 질문이 아님)"]
+
+
+def _composite_ctx(llm: FakeLLM, dropped: int = 0) -> PipelineContext:
+    ctx = _ctx(llm, AnswerKind.COMPOSITE)
+    names = {"P-RENT": "청년 월세 지원", "P-LOAN": "청년 전세 이자 지원", "P-SAVE": "청년도약계좌"}
+    ctx.evidence = Evidence(
+        candidates=[PolicyGroup(no, 0.0, []) for no in names],
+        policies={no: _record(no, name) for no, name in names.items()},
+        filtered=True,
+        composite_groups=COMPOSITE_GROUPS,
+        question_lines=COMPOSITE_LINES,
+    )
+    ctx.analysis = AnalysisResult(
+        sub_queries=[], is_new_topic=False, fallback_reason=None, prompt_version="analyze_v10", model="m",
+        dropped_sub_queries=dropped,
+    )
+    return ctx
+
+
+# 추천 답변 규칙을 물려받고 복합 규칙을 뒤에 덧붙임. 질문은 번호 목록, 근거는 하위 질문별 머리말로 나눔
+async def test_composite_prompt_and_grouped_evidence():
+    llm = FakeLLM("[소개: 1,3]\n월세 지원으로는 다음 정책이 있어요.")
+
+    result = await _generate(_composite_ctx(llm))
+
+    assert result.prompt_version == (
+        "answer_common_v2+answer_composite_cards_v1+answer_recommend_v2+answer_composite_v1"
+    )
+    system = _system_prompt(llm)
+    assert system.index("# 추천 답변") < system.index("# 여러 질문 답변")
+    user_message = llm.messages[1]["content"]
+    assert "[질문 1: 월세 지원]\n\n<정책 1> 청년 월세 지원" in user_message
+    assert "[질문 2: 도약계좌 신청 기간 (사용자가 가리킨 정책)]\n\n<정책 3> 청년도약계좌" in user_message
+    assert user_message.endswith("[질문]\n" + "\n".join(COMPOSITE_LINES))
+    # 표시 문구가 지시문과 어긋나면 LLM이 안내할 질문을 알아보지 못함
+    assert "(따로 답하지 않음: 이유)" in system
+    assert "청년 정책 질문이 아님" in system
+    assert result.card_numbers == [1, 3]
+    assert not any("[질문 1" in context for context in result.contexts)
+
+
+# 묶음을 빠뜨리거나 지목한 정책을 빼면 카드를 보내기 전에 고침
+@pytest.mark.parametrize(
+    ("text", "cards"),
+    [("[소개: 3]\n답변", [1, 3]), ("[소개: 1,2]\n답변", [1, 2, 3]), ("답변만 있음", [1, 3])],
+)
+async def test_composite_card_line_checked_before_cards(text, cards):
+    ctx = _composite_ctx(FakeLLM(text))
+
+    events = await _events(ctx)
+
+    assert events[0] == CardsDecided(cards)
+    assert ctx.trace["composite"]["card_line_fixed"] is True
+
+
+# 분석이 버린 하위 질문은 모델에 맡기지 않고 코드가 답변 끝에 안내를 붙임
+async def test_dropped_sub_queries_notice_appended():
+    llm = FakeLLM("[소개: 1,3]\n답변입니다.")
+
+    events = await _events(_composite_ctx(llm, dropped=2))
+
+    result = events[-1]
+    assert result.answer == f"답변입니다.\n\n{generator.DROPPED_NOTICE}"
+    assert "".join(e.text for e in events if isinstance(e, AnswerDelta)) == result.answer
+
+
+async def test_no_notice_without_dropped_sub_queries():
+    result = await _generate(_composite_ctx(FakeLLM("[소개: 1,3]\n답변입니다.")))
+
+    assert result.answer == "답변입니다."
