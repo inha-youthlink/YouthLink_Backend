@@ -74,16 +74,20 @@ async def collect(ctx: PipelineContext) -> Evidence:
             targets = [PolicyGroup(no, NO_SCORE, []) for no in plan.sub.target_policy_nos if no in target_records]
             slots.append(_Slot(name, fixed=True, ranked=targets))
 
-    picked = _pick(slots, policies, deps.settings.card_candidates)
-    candidate_nos = [group.policy_no for groups in picked for group in groups]
-    documents, region_labels = await asyncio.gather(
-        repository.get_documents(candidate_nos), repository.get_region_labels(candidate_nos)
-    )
-    # 근거 순서가 카드 순서라 지역 조건이 있으면 묶음 안에서만 그 시도 정책을 앞에 둠 (묶음 순서는 질문 순서)
+    # 하위 질문마다 단일 질문과 같은 후보(상위 card_candidates개 → 지역 정책 먼저)를 만든 뒤 번갈아 고름
+    # 고른 뒤에 지역 정렬을 하면 자리가 적은 묶음에서 지역 정책이 정렬 전에 잘림 (13주차 확인 C03 기후동행카드)
+    limit = deps.settings.card_candidates
+    slots = [slot if slot.fixed else _Slot(slot.name, False, slot.ranked[:limit]) for slot in slots]
+    labeled_nos = list(dict.fromkeys(group.policy_no for slot in slots for group in slot.ranked))
+    region_labels = await repository.get_region_labels(labeled_nos)
     if ctx.conditions and ctx.conditions.region is not None:
         sido_name = ctx.conditions.region.sido_name
-        picked = [groups if slot.fixed else local_first(groups, region_labels, sido_name)
-                  for slot, groups in zip(slots, picked, strict=True)]
+        slots = [slot if slot.fixed else _Slot(slot.name, False, local_first(slot.ranked, region_labels, sido_name))
+                 for slot in slots]
+    picked = _pick(slots, policies, limit)
+    candidate_nos = [group.policy_no for groups in picked for group in groups]
+    documents = await repository.get_documents(candidate_nos)
+    region_labels = {no: region_labels[no] for no in candidate_nos if no in region_labels}
     latency["policy_lookup"] = _elapsed_ms(started)
 
     if search_plans:

@@ -228,10 +228,12 @@ async def test_targets_without_search_fix_cards():
     assert "retrieved_chunks" not in ctx.trace
 
 
-# 지역 정책 먼저는 묶음 안에서만 (묶음 순서는 질문 순서 그대로)
-async def test_local_policies_first_within_group():
-    ctx = _ctx(_sub("월세 지원"), _sub("취업 교육"), profile=Profile(region_code="28237"), candidates=7)
+# 지역 정책 먼저는 고르기 전에 묶음 안에서 (묶음 순서는 질문 순서 그대로)
+# 취업 4위인 인천 정책도 단일 질문처럼 앞으로 와서 자리가 적어도 빠지지 않음
+async def test_local_policies_first_within_group_before_picking():
+    ctx = _ctx(_sub("월세 지원"), _sub("취업 교육"), profile=Profile(region_code="28237"), candidates=4)
 
     evidence = await composite.collect(ctx)
 
-    assert _nos(evidence) == ["P-RENT", "P-RENT2", "P-MOVE", "P-INCHEON", "P-JOB1", "P-JOB2", "P-JOB3"]
+    assert _nos(evidence) == ["P-RENT", "P-RENT2", "P-INCHEON", "P-JOB1"]
+    assert set(evidence.region_labels) == set(_nos(evidence))
