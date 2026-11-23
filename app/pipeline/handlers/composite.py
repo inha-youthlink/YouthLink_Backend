@@ -64,6 +64,9 @@ async def collect(ctx: PipelineContext) -> Evidence:
     policies: dict[str, PolicyRecord] = dict(target_records)
     by_search = dict(zip((plan.number for plan in search_plans), searched, strict=True))
     slots: list[_Slot] = []
+    # 같은 정책을 가리킨 하위 질문이 둘이면 카드가 두 번 나오지 않게 앞 묶음에만 둠
+    # 정책이 모두 앞 묶음에 있으면 빈 묶음("검색된 정책 없음")을 만들지 않고 앞 묶음 머리말에 질문을 합침
+    target_slot: dict[str, int] = {}
     for plan in plans:
         name = f"질문 {plan.number}: {plan.sub.standalone_question}"
         if plan.kind == SubKind.SEARCH:
@@ -71,8 +74,15 @@ async def collect(ctx: PipelineContext) -> Evidence:
             policies.update(records)
             slots.append(_Slot(name, fixed=False, ranked=ranked))
         else:
-            targets = [PolicyGroup(no, NO_SCORE, []) for no in plan.sub.target_policy_nos if no in target_records]
-            slots.append(_Slot(name, fixed=True, ranked=targets))
+            found = [no for no in plan.sub.target_policy_nos if no in target_records]
+            nos = [no for no in found if no not in target_slot]
+            if found and not nos:
+                index = target_slot[found[0]]
+                slot = slots[index]
+                slots[index] = _Slot(f"{slot.name} / 질문 {plan.number}: {plan.sub.standalone_question}", True, slot.ranked)
+                continue
+            target_slot.update({no: len(slots) for no in nos})
+            slots.append(_Slot(name, fixed=True, ranked=[PolicyGroup(no, NO_SCORE, []) for no in nos]))
 
     # 하위 질문마다 단일 질문과 같은 후보(상위 card_candidates개 → 지역 정책 먼저)를 만든 뒤 번갈아 고름
     # 고른 뒤에 지역 정렬을 하면 자리가 적은 묶음에서 지역 정책이 정렬 전에 잘림 (13주차 확인 C03 기후동행카드)
@@ -120,17 +130,22 @@ def _plan(subs: list[ResolvedSubQuery]) -> tuple[list[_Plan], list[str]]:
     plans: list[_Plan] = []
     lines: list[str] = []
     cards = 0
+    # 같은 정책을 다시 가리키면 카드가 늘지 않으므로 한 번만 셈
+    counted_targets: set[str] = set()
     for sub in subs:
         kind = sub_kind(sub)
         if kind == SubKind.IGNORE:
             continue
         reason = SKIP_REASONS.get(kind)
         if reason is None:
-            need = len(sub.targets) if kind == SubKind.TARGET else 1
+            new_targets = set(sub.target_policy_nos) - counted_targets
+            need = len(new_targets) if kind == SubKind.TARGET else 1
             if plans and cards + need > COMPOSITE_MAX_CARDS:
                 reason = CARD_LIMIT_REASON
             else:
                 cards += need
+                if kind == SubKind.TARGET:
+                    counted_targets |= new_targets
         number = len(lines) + 1
         lines.append(f"{number}. {sub.standalone_question}" + (f" ({SKIP_MARK}: {reason})" if reason else ""))
         if reason is None:

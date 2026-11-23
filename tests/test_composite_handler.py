@@ -237,3 +237,34 @@ async def test_local_policies_first_within_group_before_picking():
 
     assert _nos(evidence) == ["P-RENT", "P-RENT2", "P-INCHEON", "P-JOB1"]
     assert set(evidence.region_labels) == set(_nos(evidence))
+
+
+# 같은 정책을 가리킨 하위 질문이 둘이어도 카드는 한 번. 빈 묶음 대신 앞 묶음 머리말에 질문을 합침
+async def test_same_target_in_two_sub_questions_shown_once():
+    ctx = _ctx(
+        _sub("월세 신청 기간", Intent.POLICY_DETAIL, targets=[RENT]),
+        _sub("월세 지원 대상", Intent.ELIGIBILITY, targets=[RENT]),
+        _sub("취업 교육"),
+    )
+
+    evidence = await composite.collect(ctx)
+
+    assert _nos(evidence).count("P-RENT") == 1
+    assert evidence.composite_groups[0] == CompareGroup("질문 1: 월세 신청 기간 / 질문 2: 월세 지원 대상", 1, fixed=True)
+    assert [group.name for group in evidence.composite_groups[1:]] == ["질문 3: 취업 교육"]
+
+
+# 다시 가리킨 정책은 카드 자리를 더 쓰지 않아, 뒤 검색 질문이 자리 넘음으로 빠지지 않음
+async def test_repeated_target_does_not_use_card_slot():
+    ctx = _ctx(
+        _sub("두 정책 신청 기간", Intent.POLICY_DETAIL, targets=[RENT, MOVE]),
+        _sub("월세 지원 대상", Intent.ELIGIBILITY, targets=[RENT]),
+        _sub("취업 교육"),
+    )
+
+    evidence = await composite.collect(ctx)
+
+    assert not any("따로 답하지 않음" in line for line in evidence.question_lines)
+    assert [group.name for group in evidence.composite_groups] == [
+        "질문 1: 두 정책 신청 기간 / 질문 2: 월세 지원 대상", "질문 3: 취업 교육"
+    ]

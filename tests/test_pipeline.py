@@ -333,3 +333,15 @@ async def test_composite_question_collects_per_sub_question():
     # 지목한 정책은 검색 묶음에 다시 넣지 않음
     assert [policy.policy_no for policy in output.policies] == ["P-RENT", "P-MOVE"]
     assert output.trace["composite"]["questions"][2] == "3. 중위소득이 뭐야 (따로 답하지 않음: 청년 정책 질문이 아님)"
+
+
+# 인사·범위 밖뿐이면 검색 없이 짧은 답변
+async def test_only_chitchat_and_out_of_scope_answers_short():
+    llm = CompositeLLM([_sub("안녕", Intent.CHITCHAT), _sub("날씨 어때", Intent.OUT_OF_SCOPE)], "안녕하세요!")
+    deps = _deps(llm)
+
+    output = await run_pipeline(PipelineInput(question="안녕! 날씨 어때?"), deps)
+
+    assert (output.trace["handler"], output.trace["answer_kind"]) == ("short", "short")
+    assert deps.retriever.calls == 0
+    assert output.policies == []

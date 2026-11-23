@@ -54,8 +54,12 @@ def _route_by_analysis(analysis: AnalysisResult) -> Route:
     if analysis.fallback_reason is not None or not analysis.sub_queries:
         return Route(Handler.SEARCH, AnswerKind.RECOMMEND)
     if len(analysis.sub_queries) > 1:
+        kinds = [sub_kind(sub) for sub in analysis.sub_queries]
+        # 인사·범위 밖뿐이면 답할 근거가 없어 단일 질문의 인사·범위 밖과 같게 짧게 답함
+        if all(kind in (SubKind.IGNORE, SubKind.OUT_OF_SCOPE) for kind in kinds):
+            return Route(Handler.SHORT, AnswerKind.SHORT)
         # 모두 지목한 정책을 묻는 질문은 상세 핸들러가 이미 모든 하위 질문의 대상을 모음
-        if all(sub_kind(sub) == SubKind.TARGET for sub in analysis.sub_queries):
+        if all(kind == SubKind.TARGET for kind in kinds):
             return Route(Handler.DETAIL, AnswerKind.DETAIL)
         return Route(Handler.COMPOSITE, AnswerKind.COMPOSITE)
 

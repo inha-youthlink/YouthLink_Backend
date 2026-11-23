@@ -138,6 +138,10 @@ def test_comparison_region_mismatch(sub, route):
         # 지목했어도 없는 카드 번호가 섞이면 지목만으로 볼 수 없음
         (_analysis(_sub(Intent.POLICY_DETAIL, [RENT]), _sub(Intent.POLICY_DETAIL, [MOVE], unresolved=["5"])), COMPOSITE),
         (_analysis(_sub(Intent.POLICY_LIST), _sub(Intent.POLICY_LIST), failed=True), SEARCH_RECOMMEND),
+        # 답할 하위 질문이 없으면 짧은 답변. 불명확이 섞이면 복합 답변이 이유를 안내함
+        (_analysis(_sub(Intent.CHITCHAT), _sub(Intent.CHITCHAT)), SHORT),
+        (_analysis(_sub(Intent.CHITCHAT), _sub(Intent.OUT_OF_SCOPE)), SHORT),
+        (_analysis(_sub(Intent.OUT_OF_SCOPE), _sub(Intent.UNCLEAR)), COMPOSITE),
     ],
 )
 def test_composite_routes(analysis, route):
