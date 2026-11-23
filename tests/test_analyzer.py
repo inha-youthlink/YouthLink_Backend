@@ -179,6 +179,8 @@ async def test_sub_queries_limited():
     result = await analyzer.analyze(_ctx(PipelineInput(question="질문"), llm))
 
     assert [sub.standalone_question for sub in result.sub_queries] == ["질문0", "질문1", "질문2"]
+    assert result.dropped_sub_queries == 2
+    assert result.to_trace()["dropped_sub_queries"] == 2
 
 
 async def test_llm_error_falls_back_to_original_question():
@@ -237,6 +239,7 @@ async def test_trace_after_success():
         }],
         "is_new_topic": False,
         "fallback_reason": None,
+        "dropped_sub_queries": 0,
     }
 
 

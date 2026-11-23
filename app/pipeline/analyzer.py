@@ -61,6 +61,8 @@ class AnalysisResult:
     completion_tokens: int = 0
     cached_tokens: int = 0
     reasoning_tokens: int = 0
+    # 상한을 넘어 버린 하위 질문 수. 버린 질문을 답변에서 따로 물어 달라고 알려야 해서 남김
+    dropped_sub_queries: int = 0
 
     def to_trace(self) -> dict[str, Any]:
         return {
@@ -92,6 +94,7 @@ class AnalysisResult:
             ],
             "is_new_topic": self.is_new_topic,
             "fallback_reason": self.fallback_reason.value if self.fallback_reason else None,
+            "dropped_sub_queries": self.dropped_sub_queries,
         }
 
     # 하위 질문이 여럿이면 원래 질문 대신 맥락이 풀린 질문을 이어 붙여 지시어·배경 설명을 피함
@@ -144,6 +147,7 @@ async def analyze(ctx: PipelineContext) -> AnalysisResult:
         completion_tokens=result.completion_tokens,
         cached_tokens=result.cached_tokens,
         reasoning_tokens=result.reasoning_tokens,
+        dropped_sub_queries=max(len(parsed.sub_queries) - MAX_SUB_QUERIES, 0),
     )
 
 
